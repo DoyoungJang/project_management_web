@@ -1,0 +1,128 @@
+﻿<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>프로젝트 상세 조정</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero__inner">
+        <div class="topbar">
+          <a class="btn-link" href="/">프로젝트 목록으로 돌아가기</a>
+          <div class="actions">
+            <a class="btn-link" href="/static/template.html">템플릿</a>
+            <a id="admin-link" class="btn-link hidden" href="/static/admin.html">Admin</a>
+            <button id="logout-btn" type="button">로그아웃</button>
+          </div>
+        </div>
+        <h1 id="project-title">프로젝트 상세 조정</h1>
+        <p>체크리스트를 보드에서 드래그로 이동하거나 체크박스로 완료 처리할 수 있습니다.</p>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel">
+        <h2>기본 정보</h2>
+        <form id="project-update-form" class="form-grid">
+          <input name="name" placeholder="프로젝트명" required minlength="2" />
+          <input name="owner" placeholder="owner username" required minlength="2" />
+          <input name="due_date" type="date" />
+          <select name="status">
+            <option value="planned">Planned</option>
+            <option value="active">Active</option>
+            <option value="done">Done</option>
+          </select>
+          <textarea name="description" placeholder="설명"></textarea>
+          <button type="submit">정보 저장</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>체크리스트 보드 (Drag & Drop)</h2>
+        <div id="kanban-board" class="kanban-board">
+          <div class="kanban-col" data-status="upcoming">
+            <h3>Upcoming</h3>
+            <div class="kanban-drop" data-drop-zone="upcoming"></div>
+          </div>
+          <div class="kanban-col" data-status="inprogress">
+            <h3>In Progress</h3>
+            <div class="kanban-drop" data-drop-zone="inprogress"></div>
+          </div>
+          <div class="kanban-col" data-status="done">
+            <h3>Done</h3>
+            <div class="kanban-drop" data-drop-zone="done"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>템플릿 적용</h2>
+        <div class="inline-row">
+          <select id="template-select"></select>
+          <button id="apply-template-btn" type="button">선택 템플릿 적용</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>프로젝트 참가자</h2>
+        <form id="participant-form" class="inline-row">
+          <input id="participant-username" placeholder="participant username" minlength="2" required />
+          <button type="submit">참가자 추가</button>
+        </form>
+        <div id="participant-list" class="list" style="margin-top: 10px"></div>
+      </section>
+
+      <section class="panel">
+        <h2>알림 설정</h2>
+        <form id="rule-form" class="inline-row">
+          <input id="days-before-input" type="number" min="0" max="365" value="1" />
+          <button type="submit">알림 규칙 추가</button>
+        </form>
+        <div id="rule-list" class="list" style="margin-top: 10px"></div>
+        <h3 style="margin-top: 14px">알림 미리보기 (30일)</h3>
+        <div id="notification-preview-list" class="list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>체크리스트 추가/관리</h2>
+        <div id="stage-container" class="stage-container"></div>
+      </section>
+    </main>
+
+    <script>
+      (() => {
+        const params = new URLSearchParams(window.location.search);
+        const projectId = Number(params.get("project_id"));
+        if (!projectId) return;
+
+        fetch(`/api/projects/${projectId}`, { credentials: "same-origin" })
+          .then(async (res) => {
+            if (res.status === 401) {
+              window.location.href = "/static/login.html";
+              throw new Error("Unauthorized");
+            }
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+          })
+          .then((project) => {
+            const title = document.getElementById("project-title");
+            if (title) title.textContent = `${project.name || "프로젝트"} - 상세 조정`;
+            const form = document.getElementById("project-update-form");
+            if (!form) return;
+            ["name", "owner", "due_date", "status", "description"].forEach((key) => {
+              const field = form.elements[key];
+              if (field) field.value = project[key] ?? "";
+            });
+          })
+          .catch((err) => {
+            if (!String(err.message || "").includes("Unauthorized")) {
+              console.error("project bootstrap error:", err);
+            }
+          });
+      })();
+    </script>
+    <script src="/static/project.js?v=20260224_3"></script>
+  </body>
+</html>

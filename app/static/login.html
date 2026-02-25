@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>로그인</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="auth-wrap">
+      <section class="auth-card">
+        <h1>프로젝트 관리 로그인</h1>
+        <p>내부망 계정으로 로그인하세요.</p>
+
+        <form id="login-form" class="auth-form">
+          <input name="username" placeholder="아이디" required />
+          <input name="password" type="password" placeholder="비밀번호" required />
+          <button type="submit">로그인</button>
+        </form>
+
+        <div class="auth-note">
+          초기 관리자 계정: <code>admin / admin123!</code>
+        </div>
+      </section>
+    </main>
+    <script src="/static/login.js"></script>
+  </body>
+</html>

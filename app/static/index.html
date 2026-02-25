@@ -1,0 +1,99 @@
+﻿<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>회사 프로젝트 관리</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero__inner">
+        <div class="topbar">
+          <div id="user-info"></div>
+          <div class="actions">
+            <a class="btn-link" href="/static/template.html">템플릿</a>
+            <a id="admin-link" class="btn-link hidden" href="/static/admin.html">Admin</a>
+            <button id="logout-btn" type="button">로그아웃</button>
+          </div>
+        </div>
+        <h1>Company Project Hub</h1>
+        <p>프로젝트와 작업을 한 화면에서 관리하세요.</p>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="cards">
+        <article class="card"><h3>전체 프로젝트</h3><p id="stat-projects">0</p></article>
+        <article class="card"><h3>진행 중 프로젝트</h3><p id="stat-active">0</p></article>
+        <article class="card"><h3>전체 작업</h3><p id="stat-tasks">0</p></article>
+        <article class="card"><h3>완료율</h3><p id="stat-rate">0%</p></article>
+      </section>
+
+      <section class="panel">
+        <h2>내 프로젝트 마감 임박 체크리스트</h2>
+        <div id="today-notifications" class="list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>프로젝트 등록</h2>
+        <form id="project-form" class="form-grid">
+          <input name="name" placeholder="프로젝트명" required minlength="2" />
+          <input name="owner" placeholder="owner username" required minlength="2" />
+          <input name="due_date" type="date" />
+          <select name="status">
+            <option value="planned">Planned</option>
+            <option value="active">Active</option>
+            <option value="done">Done</option>
+          </select>
+          <textarea name="description" placeholder="설명"></textarea>
+          <button type="submit">프로젝트 추가</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>작업 등록</h2>
+        <form id="task-form" class="form-grid">
+          <select name="project_id" id="task-project-select" required></select>
+          <input name="title" placeholder="작업명" required minlength="2" />
+          <input name="assignee" placeholder="assignee username" required minlength="2" />
+          <input name="due_date" type="date" />
+          <select name="priority">
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+          <select name="status">
+            <option value="todo">Todo</option>
+            <option value="in_progress">In Progress</option>
+            <option value="done">Done</option>
+          </select>
+          <textarea name="description" placeholder="상세 설명"></textarea>
+          <button type="submit">작업 추가</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel__header">
+          <h2>프로젝트 목록</h2>
+        </div>
+        <div id="project-list" class="list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel__header">
+          <h2>작업 목록</h2>
+          <select id="task-filter-status">
+            <option value="">전체</option>
+            <option value="todo">Todo</option>
+            <option value="in_progress">In Progress</option>
+            <option value="done">Done</option>
+          </select>
+        </div>
+        <div id="task-list" class="list"></div>
+      </section>
+    </main>
+
+    <script src="/static/app.js?v=20260225_2"></script>
+  </body>
+</html>
