@@ -19,8 +19,13 @@
       body: JSON.stringify(body),
     });
   },
-  del(url) {
-    return this.request(url, { method: "DELETE" });
+  del(url, body = null) {
+    const options = { method: "DELETE" };
+    if (body !== null && body !== undefined) {
+      options.headers = { "Content-Type": "application/json" };
+      options.body = JSON.stringify(body);
+    }
+    return this.request(url, options);
   },
 };
 
@@ -227,7 +232,9 @@ function renderProjects() {
 
   els.projectList.innerHTML = projects
     .map(
-      (p) => `
+      (p) => {
+        const canDelete = Boolean(currentUser && (currentUser.is_admin || currentUser.username === p.owner));
+        return `
       <div class="item">
         <div class="item__head">
           <strong>${escapeHtml(p.name)}</strong>
@@ -238,10 +245,11 @@ function renderProjects() {
         <div class="actions">
           <button data-open-project="${p.id}">보드</button>
           <button class="btn-settings" data-open-project-settings="${p.id}">프로젝트 설정</button>
-          <button class="danger" data-del-project="${p.id}">삭제</button>
+          ${canDelete ? `<button class="danger" data-del-project="${p.id}">삭제</button>` : ""}
         </div>
       </div>
-    `
+    `;
+      }
     )
     .join("");
 }
@@ -356,9 +364,19 @@ els.projectList.addEventListener("click", async (e) => {
 
   const id = delBtn.getAttribute("data-del-project");
   if (!confirm("프로젝트를 삭제하면 관련 작업도 함께 삭제됩니다. 계속할까요?")) return;
+  const password = prompt("프로젝트 삭제를 위해 본인 비밀번호를 입력하세요.");
+  if (password === null) return;
+  if (!String(password).trim()) {
+    alert("비밀번호를 입력해야 삭제할 수 있습니다.");
+    return;
+  }
 
-  await api.del(`/api/projects/${id}`);
-  await refreshAll();
+  try {
+    await api.del(`/api/projects/${id}`, { password: String(password).trim() });
+    await refreshAll();
+  } catch (err) {
+    alert(parseApiError(err));
+  }
 });
 
 els.taskList.addEventListener("click", async (e) => {

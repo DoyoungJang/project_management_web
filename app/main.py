@@ -383,6 +383,10 @@ class ProjectUpdate(BaseModel):
     due_date: str | None = None
 
 
+class ProjectDeleteRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
+
+
 class TaskCreate(BaseModel):
     project_id: int
     title: str = Field(min_length=2, max_length=120)
@@ -858,9 +862,14 @@ def update_project(
 
 @app.delete("/api/projects/{project_id}")
 def delete_project(
-    project_id: int, current_user: dict[str, Any] = Depends(get_current_user)
+    project_id: int,
+    payload: ProjectDeleteRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, bool]:
     with get_db() as conn:
+        user_row = conn.execute("SELECT password_hash FROM users WHERE id=?", (current_user["id"],)).fetchone()
+        if not user_row or not verify_password(payload.password, str(user_row["password_hash"])):
+            raise HTTPException(status_code=400, detail="Invalid password.")
         require_project_owner(conn, project_id, current_user)
         cur = conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
         if cur.rowcount == 0:
