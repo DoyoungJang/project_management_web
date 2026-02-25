@@ -31,7 +31,20 @@
       </section>
 
       <section class="panel">
-        <h2>내 프로젝트 마감 임박 체크리스트</h2>
+        <div class="panel__header">
+          <h2>내 프로젝트 마감 임박 체크리스트</h2>
+          <div id="upcoming-filter" class="segmented">
+            <button type="button" class="segmented__btn is-active" data-upcoming-filter="all">
+              전체 <span id="upcoming-count-all" class="segmented__count">0</span>
+            </button>
+            <button type="button" class="segmented__btn" data-upcoming-filter="owner">
+              Owner <span id="upcoming-count-owner" class="segmented__count">0</span>
+            </button>
+            <button type="button" class="segmented__btn" data-upcoming-filter="participant">
+              참가자 <span id="upcoming-count-participant" class="segmented__count">0</span>
+            </button>
+          </div>
+        </div>
         <div id="today-notifications" class="list"></div>
       </section>
 
@@ -40,13 +53,13 @@
         <form id="project-form" class="form-grid">
           <input name="name" placeholder="프로젝트명" required minlength="2" />
           <input name="owner" placeholder="owner username" required minlength="2" />
-          <input name="due_date" type="date" />
+          <input name="due_date" type="date" required />
           <select name="status">
             <option value="planned">Planned</option>
             <option value="active">Active</option>
             <option value="done">Done</option>
           </select>
-          <textarea name="description" placeholder="설명"></textarea>
+          <textarea name="description" placeholder="설명" required></textarea>
           <button type="submit">프로젝트 추가</button>
         </form>
       </section>
@@ -94,6 +107,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260225_4"></script>
+    <script src="/static/app.js?v=20260225_6"></script>
   </body>
 </html>

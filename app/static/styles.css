@@ -164,6 +164,49 @@ button:active {
   font-size: 0.8rem;
 }
 
+.badge.badge--owner {
+  background: #fff0c4;
+  color: #5c3b00;
+}
+
+.badge.badge--participant {
+  background: #dbeafe;
+  color: #173e7a;
+}
+
+.segmented {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.segmented__btn {
+  border: 1px solid #c7d4e4;
+  background: #f4f8fe;
+  color: #2a3e55;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
+.segmented__btn.is-active {
+  background: #0f6d66;
+  color: #fff;
+  border-color: #0f6d66;
+}
+
+.segmented__count {
+  display: inline-block;
+  min-width: 18px;
+  text-align: center;
+  margin-left: 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.55);
+  color: inherit;
+  font-size: 0.78rem;
+  padding: 1px 5px;
+}
+
 .stage-tag {
   background: #e7eef8;
   color: #244365;
@@ -435,6 +478,12 @@ button[data-edit-content-board]:hover {
   .settings-callout {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .segmented {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .kanban-board {

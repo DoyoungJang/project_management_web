@@ -199,6 +199,14 @@ def init_db() -> None:
             WHERE workflow_status IS NULL OR workflow_status=''
             """
         )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO project_participants (project_id, user_id)
+            SELECT p.id, u.id
+            FROM projects p
+            JOIN users u ON u.username = p.owner
+            """
+        )
         conn.commit()
 
         admin_exists = conn.execute("SELECT id FROM users WHERE is_admin=1 LIMIT 1").fetchone()
@@ -283,6 +291,19 @@ def ensure_username_exists(conn: sqlite3.Connection, username: str) -> int:
     if user_id is None:
         raise HTTPException(status_code=400, detail="Username does not exist.")
     return user_id
+
+
+def ensure_project_owner_in_participants(
+    conn: sqlite3.Connection, project_id: int, owner_username: str
+) -> None:
+    owner_user_id = ensure_username_exists(conn, owner_username)
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO project_participants (project_id, user_id)
+        VALUES (?, ?)
+        """,
+        (project_id, owner_user_id),
+    )
 
 
 def is_project_participant(conn: sqlite3.Connection, project_id: int, username: str) -> bool:
@@ -748,8 +769,11 @@ def delete_project_participant(
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, bool]:
     with get_db() as conn:
-        require_project_owner(conn, project_id, current_user)
-        user_id = get_user_id_by_username(conn, username.strip())
+        project = require_project_owner(conn, project_id, current_user)
+        target_username = username.strip()
+        if target_username == project["owner"]:
+            raise HTTPException(status_code=400, detail="Owner must remain a participant.")
+        user_id = get_user_id_by_username(conn, target_username)
         if user_id is None:
             raise HTTPException(status_code=404, detail="Participant not found.")
         cur = conn.execute(
@@ -767,8 +791,12 @@ def create_project(
     payload: ProjectCreate, current_user: dict[str, Any] = Depends(get_current_user)
 ) -> dict[str, Any]:
     owner = payload.owner.strip()
+    name = payload.name.strip()
     with get_db() as conn:
         ensure_username_exists(conn, owner)
+        exists = conn.execute("SELECT id FROM projects WHERE name=?", (name,)).fetchone()
+        if exists:
+            raise HTTPException(status_code=400, detail="Project name already exists.")
         if not current_user["is_admin"] and owner != current_user["username"]:
             raise HTTPException(status_code=403, detail="You can create only your own projects.")
         cur = conn.execute(
@@ -777,13 +805,14 @@ def create_project(
             VALUES (?, ?, ?, ?, ?)
             """,
             (
-                payload.name.strip(),
+                name,
                 payload.description.strip(),
                 owner,
                 payload.status,
                 payload.due_date,
             ),
         )
+        ensure_project_owner_in_participants(conn, int(cur.lastrowid), owner)
         conn.commit()
         row = conn.execute("SELECT * FROM projects WHERE id=?", (cur.lastrowid,)).fetchone()
     return row_to_dict(row)
@@ -799,6 +828,15 @@ def update_project(
 
     with get_db() as conn:
         require_project_owner(conn, project_id, current_user)
+        if "name" in updates:
+            name = str(updates["name"]).strip()
+            duplicate = conn.execute(
+                "SELECT id FROM projects WHERE name=? AND id<>?",
+                (name, project_id),
+            ).fetchone()
+            if duplicate:
+                raise HTTPException(status_code=400, detail="Project name already exists.")
+            updates["name"] = name
         if "owner" in updates:
             owner = str(updates["owner"]).strip()
             ensure_username_exists(conn, owner)
@@ -810,6 +848,9 @@ def update_project(
         cur = conn.execute(f"UPDATE projects SET {set_clause} WHERE id=?", values)
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="Project not found.")
+        owner_row = conn.execute("SELECT owner FROM projects WHERE id=?", (project_id,)).fetchone()
+        if owner_row:
+            ensure_project_owner_in_participants(conn, project_id, str(owner_row["owner"]))
         conn.commit()
         row = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
     return row_to_dict(row)
@@ -1274,7 +1315,8 @@ def my_upcoming_checklists(
                     c.stage,
                     c.content,
                     c.target_date,
-                    CAST(julianday(date(c.target_date)) - julianday(date('now','localtime')) AS INTEGER) AS days_left
+                    CAST(julianday(date(c.target_date)) - julianday(date('now','localtime')) AS INTEGER) AS days_left,
+                    'admin' AS membership_type
                 FROM project_checklist_items c
                 JOIN projects p ON p.id = c.project_id
                 WHERE c.is_done=0
@@ -1294,7 +1336,8 @@ def my_upcoming_checklists(
                     c.stage,
                     c.content,
                     c.target_date,
-                    CAST(julianday(date(c.target_date)) - julianday(date('now','localtime')) AS INTEGER) AS days_left
+                    CAST(julianday(date(c.target_date)) - julianday(date('now','localtime')) AS INTEGER) AS days_left,
+                    CASE WHEN p.owner=? THEN 'owner' ELSE 'participant' END AS membership_type
                 FROM project_checklist_items c
                 JOIN projects p ON p.id = c.project_id
                 WHERE c.is_done=0
@@ -1312,7 +1355,7 @@ def my_upcoming_checklists(
                   AND date(c.target_date) BETWEEN date('now','localtime') AND date('now','localtime', '+' || ? || ' day')
                 ORDER BY date(c.target_date) ASC, p.name ASC, c.stage ASC, c.position ASC
                 """,
-                (current_user["username"], current_user["username"], days),
+                (current_user["username"], current_user["username"], current_user["username"], days),
             ).fetchall()
     return [row_to_dict(row) for row in rows]
 

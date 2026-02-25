@@ -41,11 +41,17 @@ const els = {
   taskList: document.getElementById("task-list"),
   taskProjectSelect: document.getElementById("task-project-select"),
   taskFilterStatus: document.getElementById("task-filter-status"),
+  upcomingFilter: document.getElementById("upcoming-filter"),
+  upcomingCountAll: document.getElementById("upcoming-count-all"),
+  upcomingCountOwner: document.getElementById("upcoming-count-owner"),
+  upcomingCountParticipant: document.getElementById("upcoming-count-participant"),
 };
 
 let projects = [];
 let tasks = [];
 let currentUser = null;
+let upcomingItems = [];
+let upcomingRelationFilter = "all";
 
 function escapeHtml(value) {
   return String(value)
@@ -76,6 +82,21 @@ function stageLabel(raw) {
   return map[raw] || raw;
 }
 
+function relationLabel(raw) {
+  const map = {
+    owner: "Owner",
+    participant: "참가자",
+    admin: "관리자",
+  };
+  return map[raw] || "기타";
+}
+
+function relationBadgeClass(raw) {
+  if (raw === "owner") return "badge--owner";
+  if (raw === "participant") return "badge--participant";
+  return "";
+}
+
 function priorityLabel(raw) {
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
@@ -91,18 +112,44 @@ function parseApiError(error) {
 }
 
 function renderTodayNotifications(items) {
-  if (!items.length) {
-    els.todayNotifications.innerHTML = "<div class='item'>마감 임박 체크리스트가 없습니다.</div>";
+  upcomingItems = Array.isArray(items) ? items : [];
+
+  const ownerCount = upcomingItems.filter((x) => x.membership_type === "owner").length;
+  const participantCount = upcomingItems.filter((x) => x.membership_type === "participant").length;
+  if (els.upcomingCountAll) els.upcomingCountAll.textContent = String(upcomingItems.length);
+  if (els.upcomingCountOwner) els.upcomingCountOwner.textContent = String(ownerCount);
+  if (els.upcomingCountParticipant) els.upcomingCountParticipant.textContent = String(participantCount);
+
+  const visibleItems =
+    upcomingRelationFilter === "all"
+      ? upcomingItems
+      : upcomingItems.filter((x) => x.membership_type === upcomingRelationFilter);
+
+  if (!visibleItems.length) {
+    const emptyText =
+      upcomingItems.length === 0
+        ? "마감 임박 체크리스트가 없습니다."
+        : upcomingRelationFilter === "owner"
+          ? "Owner 프로젝트의 마감 임박 체크리스트가 없습니다."
+          : upcomingRelationFilter === "participant"
+            ? "참가자 프로젝트의 마감 임박 체크리스트가 없습니다."
+            : "표시할 체크리스트가 없습니다.";
+    els.todayNotifications.innerHTML = `<div class='item'>${emptyText}</div>`;
     return;
   }
 
-  els.todayNotifications.innerHTML = items
+  els.todayNotifications.innerHTML = visibleItems
     .map(
       (x) => `
       <div class="item">
         <div class="item__head">
           <strong>${escapeHtml(x.project_name)}</strong>
-          <span class="badge">D-${x.days_left}</span>
+          <div class="actions">
+            <span class="badge ${relationBadgeClass(x.membership_type)}">${escapeHtml(
+              relationLabel(x.membership_type)
+            )}</span>
+            <span class="badge">D-${x.days_left}</span>
+          </div>
         </div>
         <div>${escapeHtml(x.content)}</div>
         <div class="item__meta">단계: ${escapeHtml(stageLabel(x.stage))} | 목표일: ${escapeHtml(x.target_date || "-")}</div>
@@ -235,14 +282,24 @@ els.projectForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
     const payload = Object.fromEntries(new FormData(els.projectForm).entries());
-    const owner = String(payload.owner || "").trim();
-    if (!owner) {
-      alert("Owner 아이디를 입력해 주세요.");
-      els.projectForm.elements.owner?.focus();
+    payload.name = String(payload.name || "").trim();
+    payload.owner = String(payload.owner || "").trim();
+    payload.due_date = String(payload.due_date || "").trim();
+    payload.description = String(payload.description || "").trim();
+
+    const requiredFields = [
+      { key: "name", label: "프로젝트명" },
+      { key: "owner", label: "Owner" },
+      { key: "due_date", label: "연도-월-일" },
+      { key: "description", label: "설명" },
+    ];
+    const missing = requiredFields.filter((f) => !payload[f.key]);
+    if (missing.length > 0) {
+      alert(`빈 곳이 있습니다: ${missing.map((x) => x.label).join(", ")}`);
+      const first = missing[0];
+      els.projectForm.elements[first.key]?.focus();
       return;
     }
-
-    if (!payload.due_date) payload.due_date = null;
     await api.post("/api/projects", payload);
 
     els.projectForm.reset();
@@ -322,6 +379,17 @@ els.todayNotifications.addEventListener("click", (e) => {
   const projectId = btn.getAttribute("data-open-upcoming-project");
   const checklistId = btn.getAttribute("data-open-upcoming-checklist");
   window.location.href = `/static/project.html?project_id=${projectId}&checklist_id=${checklistId}`;
+});
+
+els.upcomingFilter?.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-upcoming-filter]");
+  if (!btn) return;
+  const filter = btn.getAttribute("data-upcoming-filter") || "all";
+  upcomingRelationFilter = filter;
+  els.upcomingFilter.querySelectorAll("[data-upcoming-filter]").forEach((x) => {
+    x.classList.toggle("is-active", x.getAttribute("data-upcoming-filter") === filter);
+  });
+  renderTodayNotifications(upcomingItems);
 });
 
 els.taskFilterStatus.addEventListener("change", loadTasks);
