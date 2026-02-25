@@ -107,7 +107,7 @@ function parseApiError(error) {
 }
 
 function setProjectForm(project) {
-  els.title.textContent = `${project.name || "프로젝트"} - 상세 조정`;
+  els.title.textContent = `${project.name || "프로젝트"} - 프로젝트 설정`;
   if (!els.form) return;
   const fields = ["name", "owner", "due_date", "status", "description"];
   for (const key of fields) {
@@ -192,6 +192,7 @@ function renderParticipants() {
 }
 
 function renderBoard() {
+  if (!els.board) return;
   for (const col of BOARD) {
     const zone = els.board.querySelector(`[data-drop-zone="${col.key}"]`);
     const items = checklistItems
@@ -227,6 +228,7 @@ function renderBoard() {
 }
 
 function renderStages() {
+  if (!els.stages) return;
   els.stages.innerHTML = STAGES.map((stage) => renderStage(stage)).join("");
 }
 
@@ -276,65 +278,70 @@ function renderStage(stage) {
 }
 
 function mountChecklistContentEditors() {
-  els.board.querySelectorAll("[data-content-board]").forEach((input) => {
-    const id = input.getAttribute("data-content-board");
-    const editWrap = input.closest(".text-edit");
-    if (!editWrap) return;
-    editWrap.classList.add("hidden");
+  if (els.board) {
+    els.board.querySelectorAll("[data-content-board]").forEach((input) => {
+      const id = input.getAttribute("data-content-board");
+      const editWrap = input.closest(".text-edit");
+      if (!editWrap) return;
+      editWrap.classList.add("hidden");
 
-    const textView = document.createElement("div");
-    textView.setAttribute("data-content-text-board", id);
-    textView.textContent = input.value || "";
+      const textView = document.createElement("div");
+      textView.setAttribute("data-content-text-board", id);
+      textView.textContent = input.value || "";
 
-    const editBtnWrap = document.createElement("div");
-    const editBtn = document.createElement("button");
-    editBtn.type = "button";
-    editBtn.textContent = "Edit";
-    editBtn.setAttribute("data-edit-content-board", id);
-    editBtnWrap.appendChild(editBtn);
+      const editBtnWrap = document.createElement("div");
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.textContent = "Edit";
+      editBtn.setAttribute("data-edit-content-board", id);
+      editBtnWrap.appendChild(editBtn);
 
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.textContent = "Cancel";
-    cancelBtn.setAttribute("data-cancel-content-board", id);
-    editWrap.appendChild(cancelBtn);
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.setAttribute("data-cancel-content-board", id);
+      editWrap.appendChild(cancelBtn);
 
-    editWrap.parentNode.insertBefore(textView, editWrap);
-    editWrap.parentNode.insertBefore(editBtnWrap, editWrap);
-  });
+      editWrap.parentNode.insertBefore(textView, editWrap);
+      editWrap.parentNode.insertBefore(editBtnWrap, editWrap);
+    });
+  }
 
-  els.stages.querySelectorAll("[data-content-list]").forEach((input) => {
-    const id = input.getAttribute("data-content-list");
-    const editWrap = input.closest(".text-edit");
-    if (!editWrap) return;
-    editWrap.classList.add("hidden");
+  if (els.stages) {
+    els.stages.querySelectorAll("[data-content-list]").forEach((input) => {
+      const id = input.getAttribute("data-content-list");
+      const editWrap = input.closest(".text-edit");
+      if (!editWrap) return;
+      editWrap.classList.add("hidden");
 
-    const textView = document.createElement("div");
-    textView.setAttribute("data-content-text-list", id);
-    textView.textContent = input.value || "";
+      const textView = document.createElement("div");
+      textView.setAttribute("data-content-text-list", id);
+      textView.textContent = input.value || "";
 
-    const toggle = els.stages.querySelector(`[data-toggle-item="${id}"]`);
-    if (toggle && toggle.checked) textView.classList.add("check-done");
+      const toggle = els.stages.querySelector(`[data-toggle-item="${id}"]`);
+      if (toggle && toggle.checked) textView.classList.add("check-done");
 
-    const editBtnWrap = document.createElement("div");
-    const editBtn = document.createElement("button");
-    editBtn.type = "button";
-    editBtn.textContent = "Edit";
-    editBtn.setAttribute("data-edit-content-list", id);
-    editBtnWrap.appendChild(editBtn);
+      const editBtnWrap = document.createElement("div");
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.textContent = "Edit";
+      editBtn.setAttribute("data-edit-content-list", id);
+      editBtnWrap.appendChild(editBtn);
 
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.textContent = "Cancel";
-    cancelBtn.setAttribute("data-cancel-content-list", id);
-    editWrap.appendChild(cancelBtn);
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.setAttribute("data-cancel-content-list", id);
+      editWrap.appendChild(cancelBtn);
 
-    editWrap.parentNode.insertBefore(textView, editWrap);
-    editWrap.parentNode.insertBefore(editBtnWrap, editWrap);
-  });
+      editWrap.parentNode.insertBefore(textView, editWrap);
+      editWrap.parentNode.insertBefore(editBtnWrap, editWrap);
+    });
+  }
 }
 
 function bindBoardDragEvents() {
+  if (!els.board) return;
   els.board.querySelectorAll("[data-drag-item]").forEach((card) => {
     card.addEventListener("dragstart", () => {
       draggingChecklistId = Number(card.getAttribute("data-drag-item"));
@@ -379,10 +386,10 @@ async function loadProject() {
 
 async function loadChecklist() {
   checklistItems = await api.get(`/api/projects/${projectId}/checklists`);
-  renderBoard();
-  renderStages();
+  if (els.board) renderBoard();
+  if (els.stages) renderStages();
   mountChecklistContentEditors();
-  bindBoardDragEvents();
+  if (els.board) bindBoardDragEvents();
 }
 
 async function loadTemplates() {
@@ -408,7 +415,7 @@ els.logoutBtn.addEventListener("click", async () => {
   window.location.href = "/static/login.html";
 });
 
-els.form.addEventListener("submit", async (e) => {
+els.form?.addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
     const payload = Object.fromEntries(new FormData(els.form).entries());
@@ -484,7 +491,7 @@ els.ruleList.addEventListener("click", async (e) => {
   await loadRulesAndPreview();
 });
 
-els.stages.addEventListener("submit", async (e) => {
+els.stages?.addEventListener("submit", async (e) => {
   const form = e.target.closest("[data-stage-form]");
   if (!form) return;
   e.preventDefault();
@@ -502,7 +509,7 @@ els.stages.addEventListener("submit", async (e) => {
   await loadRulesAndPreview();
 });
 
-els.stages.addEventListener("change", async (e) => {
+els.stages?.addEventListener("change", async (e) => {
   const checkbox = e.target.closest("[data-toggle-item]");
   if (!checkbox) return;
   const itemId = checkbox.getAttribute("data-toggle-item");
@@ -511,7 +518,7 @@ els.stages.addEventListener("change", async (e) => {
   await loadRulesAndPreview();
 });
 
-els.stages.addEventListener("click", async (e) => {
+els.stages?.addEventListener("click", async (e) => {
   const editContentBtn = e.target.closest("[data-edit-content-list]");
   if (editContentBtn) {
     const id = editContentBtn.getAttribute("data-edit-content-list");
@@ -566,7 +573,7 @@ els.stages.addEventListener("click", async (e) => {
   await loadRulesAndPreview();
 });
 
-els.board.addEventListener("click", async (e) => {
+els.board?.addEventListener("click", async (e) => {
   const editContentBtn = e.target.closest("[data-edit-content-board]");
   if (editContentBtn) {
     const id = editContentBtn.getAttribute("data-edit-content-board");

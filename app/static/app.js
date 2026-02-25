@@ -189,7 +189,8 @@ function renderProjects() {
         <div>${escapeHtml(p.description || "-")}</div>
         <div class="item__meta">담당: ${escapeHtml(p.owner)} | 마감: ${escapeHtml(p.due_date || "-")}</div>
         <div class="actions">
-          <button data-open-project="${p.id}">상세 조정</button>
+          <button data-open-project="${p.id}">보드</button>
+          <button class="btn-settings" data-open-project-settings="${p.id}">프로젝트 설정</button>
           <button class="danger" data-del-project="${p.id}">삭제</button>
         </div>
       </div>
@@ -283,6 +284,13 @@ els.projectList.addEventListener("click", async (e) => {
   if (openBtn) {
     const id = openBtn.getAttribute("data-open-project");
     window.location.href = `/static/project.html?project_id=${id}`;
+    return;
+  }
+
+  const settingsBtn = e.target.closest("[data-open-project-settings]");
+  if (settingsBtn) {
+    const id = settingsBtn.getAttribute("data-open-project-settings");
+    window.location.href = `/static/project_settings.html?project_id=${id}`;
     return;
   }
 

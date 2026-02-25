@@ -201,6 +201,49 @@ button:active {
   border-radius: 8px;
 }
 
+.btn-link--settings {
+  background: #ffde8a;
+  color: #4d3200;
+  border-color: rgba(77, 50, 0, 0.35);
+  font-weight: 700;
+}
+
+.btn-link--settings:hover {
+  background: #ffd36c;
+}
+
+.settings-callout {
+  margin-top: 12px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-callout strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.settings-callout > div {
+  font-size: 0.95rem;
+}
+
+.btn-settings {
+  background: #f3b13a;
+  color: #2f2000;
+  font-weight: 700;
+}
+
+.btn-settings:hover {
+  opacity: 1;
+  background: #efaa2a;
+}
+
 .hidden {
   display: none;
 }
@@ -304,6 +347,11 @@ button:active {
   opacity: 0.45;
 }
 
+.kanban-card.focus-target {
+  border-color: #0f6d66;
+  box-shadow: 0 0 0 2px rgba(15, 109, 102, 0.2);
+}
+
 .kanban-card__head {
   display: flex;
   justify-content: space-between;
@@ -380,6 +428,11 @@ button[data-edit-content-board]:hover {
   }
 
   .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .settings-callout {
     flex-direction: column;
     align-items: flex-start;
   }

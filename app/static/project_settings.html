@@ -1,0 +1,89 @@
+﻿<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>프로젝트 설정</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero__inner">
+        <div class="topbar">
+          <div class="actions">
+            <a class="btn-link" href="/">프로젝트 목록</a>
+            <a id="project-board-link" class="btn-link" href="#">체크리스트 보드</a>
+          </div>
+          <div class="actions">
+            <a class="btn-link" href="/static/template.html">템플릿</a>
+            <a id="admin-link" class="btn-link hidden" href="/static/admin.html">Admin</a>
+            <button id="logout-btn" type="button">로그아웃</button>
+          </div>
+        </div>
+        <h1 id="project-title">프로젝트 설정</h1>
+        <p>프로젝트 기본 정보와 체크리스트/참가자/알림 설정을 관리합니다.</p>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel">
+        <h2>기본 정보</h2>
+        <form id="project-update-form" class="form-grid">
+          <input name="name" placeholder="프로젝트명" required minlength="2" />
+          <input name="owner" placeholder="owner username" required minlength="2" />
+          <input name="due_date" type="date" />
+          <select name="status">
+            <option value="planned">Planned</option>
+            <option value="active">Active</option>
+            <option value="done">Done</option>
+          </select>
+          <textarea name="description" placeholder="설명"></textarea>
+          <button type="submit">정보 저장</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>템플릿 적용</h2>
+        <div class="inline-row">
+          <select id="template-select"></select>
+          <button id="apply-template-btn" type="button">선택 템플릿 적용</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>프로젝트 참가자</h2>
+        <form id="participant-form" class="inline-row">
+          <input id="participant-username" placeholder="participant username" minlength="2" required />
+          <button type="submit">참가자 추가</button>
+        </form>
+        <div id="participant-list" class="list" style="margin-top: 10px"></div>
+      </section>
+
+      <section class="panel">
+        <h2>알림 설정</h2>
+        <form id="rule-form" class="inline-row">
+          <input id="days-before-input" type="number" min="0" max="365" value="1" />
+          <button type="submit">알림 규칙 추가</button>
+        </form>
+        <div id="rule-list" class="list" style="margin-top: 10px"></div>
+        <h3 style="margin-top: 14px">알림 미리보기 (30일)</h3>
+        <div id="notification-preview-list" class="list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>체크리스트 추가/관리</h2>
+        <div id="stage-container" class="stage-container"></div>
+      </section>
+    </main>
+
+    <script>
+      (() => {
+        const params = new URLSearchParams(window.location.search);
+        const projectId = Number(params.get("project_id"));
+        const boardLink = document.getElementById("project-board-link");
+        if (boardLink && projectId) boardLink.href = `/static/project.html?project_id=${projectId}`;
+      })();
+    </script>
+    <script src="/static/project.js?v=20260225_1"></script>
+  </body>
+</html>
