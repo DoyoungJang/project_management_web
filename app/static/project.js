@@ -1,7 +1,7 @@
 ﻿const STAGES = [
-  { key: "data_acquisition", title: "1. ?곗씠???띾뱷" },
-  { key: "labeling", title: "2. ?쇰꺼留? },
-  { key: "development", title: "3. 媛쒕컻" },
+  { key: "data_acquisition", title: "1. 데이터 획득" },
+  { key: "labeling", title: "2. 라벨링" },
+  { key: "development", title: "3. 개발" },
 ];
 
 const BOARD = [
@@ -13,7 +13,7 @@ const BOARD = [
 const params = new URLSearchParams(window.location.search);
 const projectId = Number(params.get("project_id"));
 if (!projectId) {
-  alert("?좏슚?섏? ?딆? ?꾨줈?앺듃?낅땲??");
+  alert("유효하지 않은 프로젝트입니다.");
   window.location.href = "/";
   throw new Error("Invalid project_id");
 }
@@ -103,7 +103,12 @@ function parseApiError(error) {
   } catch (_) {
     //
   }
-  return String(error.message || "?붿껌 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.");
+  return String(error.message || "요청 처리 중 오류가 발생했습니다.");
+}
+
+async function userExists(username) {
+  const result = await api.get(`/api/users/exists?username=${encodeURIComponent(username)}`);
+  return Boolean(result.exists);
 }
 
 function setProjectForm(project) {
@@ -120,7 +125,7 @@ function setProjectForm(project) {
 
 function renderTemplateSelect() {
   if (templates.length === 0) {
-    els.templateSelect.innerHTML = "<option value=''>??λ맂 ?쒗뵆由우씠 ?놁뒿?덈떎.</option>";
+    els.templateSelect.innerHTML = "<option value=''>사용 가능한 템플릿이 없습니다.</option>";
     els.applyTemplateBtn.disabled = true;
     return;
   }
@@ -132,7 +137,7 @@ function renderTemplateSelect() {
 
 function renderNotificationRules() {
   if (notificationRules.length === 0) {
-    els.ruleList.innerHTML = "<div class='item'>?깅줉???뚮┝ 洹쒖튃???놁뒿?덈떎.</div>";
+    els.ruleList.innerHTML = "<div class='item'>등록된 알림 규칙이 없습니다.</div>";
     return;
   }
   els.ruleList.innerHTML = notificationRules
@@ -141,9 +146,9 @@ function renderNotificationRules() {
       <div class="item">
         <div class="item__head">
           <strong>D-${rule.days_before}</strong>
-          <button class="danger" data-del-rule="${rule.id}">??젣</button>
+          <button class="danger" data-del-rule="${rule.id}">삭제</button>
         </div>
-        <div class="item__meta">紐⑺몴?쇱젙 ${rule.days_before}???꾩뿉 ?뚮┝</div>
+        <div class="item__meta">목표일 ${rule.days_before}일 전에 알림</div>
       </div>
     `
     )
@@ -152,7 +157,7 @@ function renderNotificationRules() {
 
 function renderNotificationPreview(rows) {
   if (!rows.length) {
-    els.notificationPreviewList.innerHTML = "<div class='item'>?욎쑝濡?30?????덉젙???뚮┝???놁뒿?덈떎.</div>";
+    els.notificationPreviewList.innerHTML = "<div class='item'>앞으로 30일 기준 알림 예정 항목이 없습니다.</div>";
     return;
   }
   els.notificationPreviewList.innerHTML = rows
@@ -163,7 +168,7 @@ function renderNotificationPreview(rows) {
           <strong>${escapeHtml(x.content)}</strong>
           <span class="badge">${escapeHtml(x.notify_date)}</span>
         </div>
-        <div class="item__meta">?④퀎: ${escapeHtml(x.stage)} | D-${x.days_before} ?뚮┝ | 紐⑺몴?? ${escapeHtml(x.target_date)}</div>
+        <div class="item__meta">단계: ${escapeHtml(x.stage)} | D-${x.days_before} 알림 | 목표일: ${escapeHtml(x.target_date)}</div>
       </div>
     `
     )
@@ -172,17 +177,35 @@ function renderNotificationPreview(rows) {
 
 function renderParticipants() {
   if (!els.participantList) return;
-  if (!participants.length) {
-    els.participantList.innerHTML = "<div class='item'>?깅줉??李멸??먭? ?놁뒿?덈떎.</div>";
+  const list = [...participants].sort((a, b) => {
+    const aOwner = a.username === a.project_owner ? 1 : 0;
+    const bOwner = b.username === b.project_owner ? 1 : 0;
+    if (aOwner !== bOwner) return bOwner - aOwner;
+    return String(a.username).localeCompare(String(b.username));
+  });
+
+  if (!list.length) {
+    els.participantList.innerHTML = "<div class='item'>등록된 프로젝트 참가자가 없습니다.</div>";
     return;
   }
-  els.participantList.innerHTML = participants
+  els.participantList.innerHTML = `
+    <div class="item">
+      <div class="item__meta">참가자 수: ${list.length}명</div>
+    </div>
+  ` + list
     .map(
         (x) => `
       <div class="item">
         <div class="item__head">
-          <strong>${escapeHtml(x.username)}</strong>
-          <button type="button" class="danger" data-del-participant="${escapeHtml(x.username)}">??젣</button>
+          <div class="actions">
+            <strong>${escapeHtml(x.username)}</strong>
+            ${x.username === x.project_owner ? '<span class="badge badge--owner">Owner</span>' : ""}
+          </div>
+          ${
+            x.username === x.project_owner
+              ? ""
+              : `<button type="button" class="danger" data-del-participant="${escapeHtml(x.username)}">삭제</button>`
+          }
         </div>
         <div class="item__meta">${escapeHtml(x.display_name || "")}</div>
       </div>
@@ -200,7 +223,7 @@ function renderBoard() {
       .sort((a, b) => (a.position || 0) - (b.position || 0));
 
     if (!items.length) {
-      zone.innerHTML = "<div class='item__meta'>??ぉ ?놁쓬</div>";
+      zone.innerHTML = "<div class='item__meta'>항목 없음</div>";
       continue;
     }
 
@@ -214,11 +237,11 @@ function renderBoard() {
           </div>
           <div class="text-edit">
             <input type="text" data-content-board="${item.id}" value="${escapeHtml(item.content)}" maxlength="200" />
-            <button type="button" data-save-content-board="${item.id}">?댁슜 ???/button>
+            <button type="button" data-save-content-board="${item.id}">내용 저장</button>
           </div>
           <div class="date-edit">
             <input type="date" data-date-board="${item.id}" value="${item.target_date || ""}" />
-            <button type="button" data-save-date-board="${item.id}">?쇱젙 ???/button>
+            <button type="button" data-save-date-board="${item.id}">일정 저장</button>
           </div>
         </article>
       `
@@ -236,24 +259,24 @@ function renderStage(stage) {
   const items = checklistItems.filter((x) => x.stage === stage.key);
   const listHtml =
     items.length === 0
-      ? "<div class='item__meta'>泥댄겕由ъ뒪????ぉ???놁뒿?덈떎.</div>"
+      ? "<div class='item__meta'>체크리스트 항목이 없습니다.</div>"
       : items
           .map(
             (item) => `
             <div class="check-item">
               <input type="checkbox" data-toggle-item="${item.id}" ${item.is_done ? "checked" : ""} />
               <span class="${item.is_done ? "check-done" : ""}">
-                <small class="item__meta">${item.target_date ? `紐⑺몴?? ${escapeHtml(item.target_date)}` : ""}</small>
+                <small class="item__meta">${item.target_date ? `목표일: ${escapeHtml(item.target_date)}` : ""}</small>
               </span>
-              <button type="button" class="danger check-del" data-del-item="${item.id}">??젣</button>
+              <button type="button" class="danger check-del" data-del-item="${item.id}">삭제</button>
             </div>
             <div class="text-edit">
               <input type="text" data-content-list="${item.id}" value="${escapeHtml(item.content)}" maxlength="200" />
-              <button type="button" data-save-content-list="${item.id}">?댁슜 ???/button>
+              <button type="button" data-save-content-list="${item.id}">내용 저장</button>
             </div>
             <div class="date-edit">
               <input type="date" data-date-list="${item.id}" value="${item.target_date || ""}" />
-              <button type="button" data-save-date-list="${item.id}">?쇱젙 ???/button>
+              <button type="button" data-save-date-list="${item.id}">일정 저장</button>
             </div>
           `
           )
@@ -264,14 +287,14 @@ function renderStage(stage) {
       <h3>${stage.title}</h3>
       <div class="check-list">${listHtml}</div>
       <form class="check-form with-date" data-stage-form="${stage.key}">
-        <input name="content" placeholder="泥댄겕由ъ뒪????ぉ ?낅젰" required minlength="1" maxlength="200" />
+        <input name="content" placeholder="체크리스트 항목 입력" required minlength="1" maxlength="200" />
         <input name="target_date" type="date" />
         <select name="workflow_status">
           <option value="upcoming">Upcoming</option>
           <option value="inprogress">In Progress</option>
           <option value="done">Done</option>
         </select>
-        <button type="submit">異붽?</button>
+        <button type="submit">추가</button>
       </form>
     </article>
   `;
@@ -443,6 +466,14 @@ els.participantForm?.addEventListener("submit", async (e) => {
       els.participantUsername?.focus();
       return;
     }
+
+    const exists = await userExists(username);
+    if (!exists) {
+      alert("존재하지 않는 아이디입니다.");
+      els.participantUsername?.focus();
+      return;
+    }
+
     await api.post(`/api/projects/${projectId}/participants`, { username });
     els.participantForm.reset();
     await loadParticipants();
@@ -467,11 +498,11 @@ els.participantList?.addEventListener("click", async (e) => {
 els.applyTemplateBtn.addEventListener("click", async () => {
   const templateId = Number(els.templateSelect.value);
   if (!templateId) return;
-  if (!confirm("?꾩옱 泥댄겕由ъ뒪?몃? 吏?곌퀬 ?좏깮???쒗뵆由우쑝濡??곸슜?좉퉴??")) return;
+  if (!confirm("현재 체크리스트를 지우고 선택한 템플릿으로 적용할까요?")) return;
   await api.post(`/api/projects/${projectId}/apply-template/${templateId}`, {});
   await loadChecklist();
   await loadRulesAndPreview();
-  alert("?쒗뵆由우씠 ?곸슜?섏뿀?듬땲??");
+  alert("템플릿이 적용되었습니다.");
 });
 
 els.ruleForm.addEventListener("submit", async (e) => {
@@ -486,7 +517,7 @@ els.ruleList.addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-del-rule]");
   if (!btn) return;
   const id = btn.getAttribute("data-del-rule");
-  if (!confirm("?뚮┝ 洹쒖튃????젣?좉퉴??")) return;
+  if (!confirm("알림 규칙을 삭제할까요?")) return;
   await api.del(`/api/notification-rules/${id}`);
   await loadRulesAndPreview();
 });
@@ -544,7 +575,7 @@ els.stages?.addEventListener("click", async (e) => {
     const input = els.stages.querySelector(`[data-content-list="${id}"]`);
     const content = (input.value || "").trim();
     if (!content) {
-      alert("泥댄겕由ъ뒪????ぉ ?댁슜???낅젰??二쇱꽭??");
+      alert("체크리스트 항목 내용을 입력해 주세요.");
       input.focus();
       return;
     }
@@ -567,7 +598,7 @@ els.stages?.addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-del-item]");
   if (!btn) return;
   const itemId = btn.getAttribute("data-del-item");
-  if (!confirm("泥댄겕由ъ뒪????ぉ????젣?좉퉴??")) return;
+  if (!confirm("체크리스트 항목을 삭제할까요?")) return;
   await api.del(`/api/checklists/${itemId}`);
   await loadChecklist();
   await loadRulesAndPreview();
@@ -599,7 +630,7 @@ els.board?.addEventListener("click", async (e) => {
     const input = els.board.querySelector(`[data-content-board="${id}"]`);
     const content = (input.value || "").trim();
     if (!content) {
-      alert("泥댄겕由ъ뒪????ぉ ?댁슜???낅젰??二쇱꽭??");
+      alert("체크리스트 항목 내용을 입력해 주세요.");
       input.focus();
       return;
     }
@@ -639,5 +670,6 @@ Promise.resolve()
       alert(parseApiError(err));
     }
   });
+
 
 

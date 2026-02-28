@@ -352,6 +352,12 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=6, max_length=128)
 
 
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=2, max_length=40, pattern=r"^[a-zA-Z0-9._-]+$")
+    display_name: str = Field(min_length=2, max_length=60)
+    password: str = Field(min_length=6, max_length=128)
+
+
 class AdminUserCreate(BaseModel):
     username: str = Field(min_length=2, max_length=40, pattern=r"^[a-zA-Z0-9._-]+$")
     display_name: str = Field(min_length=2, max_length=60)
@@ -485,6 +491,27 @@ def login(payload: LoginRequest, response: Response) -> dict[str, Any]:
         path="/",
     )
     return {"user": user_public(user), "expires_at": expires_at}
+
+
+@app.post("/api/auth/register", status_code=201)
+def register(payload: RegisterRequest) -> dict[str, Any]:
+    username = payload.username.strip()
+    display_name = payload.display_name.strip()
+
+    with get_db() as conn:
+        exists = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+        if exists:
+            raise HTTPException(status_code=400, detail="Username already exists.")
+        cur = conn.execute(
+            """
+            INSERT INTO users (username, display_name, password_hash, is_admin, auth_provider, email)
+            VALUES (?, ?, ?, 0, 'local', NULL)
+            """,
+            (username, display_name, hash_password(payload.password)),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM users WHERE id=?", (cur.lastrowid,)).fetchone()
+    return {"user": user_public(row)}
 
 
 @app.post("/api/auth/logout")
@@ -716,6 +743,8 @@ def list_project_participants(
 ) -> list[dict[str, Any]]:
     with get_db() as conn:
         project = require_project_access(conn, project_id, current_user)
+        ensure_project_owner_in_participants(conn, project_id, str(project["owner"]))
+        conn.commit()
         rows = conn.execute(
             """
             SELECT u.id, u.username, u.display_name, pp.created_at
