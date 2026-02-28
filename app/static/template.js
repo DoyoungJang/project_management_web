@@ -1,4 +1,4 @@
-const STAGES = [
+﻿const STAGES = [
   { key: "data_acquisition", title: "1. 데이터 획득" },
   { key: "labeling", title: "2. 라벨링" },
   { key: "development", title: "3. 개발" },
@@ -69,6 +69,16 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function parseApiError(error) {
+  try {
+    const parsed = JSON.parse(String(error.message || ""));
+    if (parsed && typeof parsed.detail === "string") return parsed.detail;
+  } catch (_) {
+    // no-op
+  }
+  return String(error.message || "요청 처리 중 오류가 발생했습니다.");
+}
+
 function markDirty() {
   isDirty = true;
 }
@@ -95,7 +105,7 @@ async function loadTemplates() {
 
 function renderTemplateList() {
   if (templates.length === 0) {
-    els.list.innerHTML = "<div class='item'>저장된 템플릿이 없습니다.</div>";
+    els.list.innerHTML = "<div class='item'>사용 가능한 템플릿이 없습니다.</div>";
     return;
   }
 
@@ -148,7 +158,7 @@ function renderStage(stage) {
       <div class="check-list">
         ${
           items.length === 0
-            ? "<div class='item__meta'>항목 없음</div>"
+            ? "<div class='item__meta'>작업 항목이 없습니다.</div>"
             : items
                 .map(
                   (item) => `
@@ -162,7 +172,7 @@ function renderStage(stage) {
         }
       </div>
       <form class="check-form" data-stage="${stage.key}">
-        <input name="content" placeholder="체크리스트 항목 입력" required minlength="1" maxlength="200" />
+        <input name="content" placeholder="작업 항목 입력" required minlength="1" maxlength="200" />
         <button type="submit">추가</button>
       </form>
     </article>
@@ -185,11 +195,15 @@ els.logoutBtn.addEventListener("click", async () => {
 
 els.createForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const payload = Object.fromEntries(new FormData(els.createForm).entries());
-  const created = await api.post("/api/templates", payload);
-  els.createForm.reset();
-  await loadTemplates();
-  await selectTemplate(created.id);
+  try {
+    const payload = Object.fromEntries(new FormData(els.createForm).entries());
+    const created = await api.post("/api/templates", payload);
+    els.createForm.reset();
+    await loadTemplates();
+    await selectTemplate(created.id);
+  } catch (err) {
+    alert(parseApiError(err));
+  }
 });
 
 els.list.addEventListener("click", async (e) => {
@@ -202,24 +216,28 @@ els.updateForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!selectedTemplateId) return;
 
-  const payload = Object.fromEntries(new FormData(els.updateForm).entries());
-  await api.patch(`/api/templates/${selectedTemplateId}`, payload);
+  try {
+    const payload = Object.fromEntries(new FormData(els.updateForm).entries());
+    await api.patch(`/api/templates/${selectedTemplateId}`, payload);
 
-  const replacePayload = {
-    items: selectedTemplateItems
-      .slice()
-      .sort((a, b) => {
-        const order = { data_acquisition: 1, labeling: 2, development: 3 };
-        return order[a.stage] - order[b.stage] || a.position - b.position;
-      })
-      .map((x) => ({ stage: x.stage, content: x.content, position: x.position })),
-  };
-  await api.put(`/api/templates/${selectedTemplateId}/items`, replacePayload);
+    const replacePayload = {
+      items: selectedTemplateItems
+        .slice()
+        .sort((a, b) => {
+          const order = { data_acquisition: 1, labeling: 2, development: 3 };
+          return order[a.stage] - order[b.stage] || a.position - b.position;
+        })
+        .map((x) => ({ stage: x.stage, content: x.content, position: x.position })),
+    };
+    await api.put(`/api/templates/${selectedTemplateId}/items`, replacePayload);
 
-  clearDirty();
-  await loadTemplates();
-  await selectTemplate(selectedTemplateId);
-  alert("템플릿 정보를 저장했습니다.");
+    clearDirty();
+    await loadTemplates();
+    await selectTemplate(selectedTemplateId);
+    alert("템플릿 정보를 저장했습니다.");
+  } catch (err) {
+    alert(parseApiError(err));
+  }
 });
 
 els.updateForm.addEventListener("input", () => {
@@ -229,18 +247,24 @@ els.updateForm.addEventListener("input", () => {
 els.deleteBtn.addEventListener("click", async () => {
   if (!selectedTemplateId) return;
   if (!confirm("선택한 템플릿을 삭제할까요?")) return;
-  await api.del(`/api/templates/${selectedTemplateId}`);
-  selectedTemplateId = null;
-  selectedTemplateItems = [];
-  clearDirty();
-  els.detailPanel.classList.add("hidden");
-  await loadTemplates();
+
+  try {
+    await api.del(`/api/templates/${selectedTemplateId}`);
+    selectedTemplateId = null;
+    selectedTemplateItems = [];
+    clearDirty();
+    els.detailPanel.classList.add("hidden");
+    await loadTemplates();
+  } catch (err) {
+    alert(parseApiError(err));
+  }
 });
 
 els.stageContainer.addEventListener("submit", async (e) => {
   const form = e.target.closest("[data-stage]");
   if (!form || !selectedTemplateId) return;
   e.preventDefault();
+
   const stage = form.getAttribute("data-stage");
   const payload = Object.fromEntries(new FormData(form).entries());
 
@@ -248,12 +272,14 @@ els.stageContainer.addEventListener("submit", async (e) => {
     selectedTemplateItems
       .filter((x) => x.stage === stage)
       .reduce((max, x) => Math.max(max, x.position), -1) + 1;
+
   selectedTemplateItems.push({
     id: `draft_${Date.now()}_${Math.random()}`,
     stage,
     content: String(payload.content).trim(),
     position: nextPos,
   });
+
   form.reset();
   markDirty();
   renderSelectedTemplateDetail();
@@ -262,6 +288,7 @@ els.stageContainer.addEventListener("submit", async (e) => {
 els.stageContainer.addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-del-item]");
   if (!btn) return;
+
   const stage = btn.getAttribute("data-del-stage");
   const position = Number(btn.getAttribute("data-del-item"));
   selectedTemplateItems = selectedTemplateItems.filter(
@@ -278,6 +305,6 @@ Promise.resolve()
   .catch((err) => {
     console.error(err);
     if (!String(err.message).includes("Unauthorized")) {
-      alert(`오류가 발생했습니다: ${err.message}`);
+      alert(`오류가 발생했습니다: ${parseApiError(err)}`);
     }
   });

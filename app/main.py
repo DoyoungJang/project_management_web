@@ -393,25 +393,6 @@ class ProjectDeleteRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
-class TaskCreate(BaseModel):
-    project_id: int
-    title: str = Field(min_length=2, max_length=120)
-    description: str = Field(default="", max_length=500)
-    assignee: str = Field(min_length=2, max_length=40, pattern=r"^[a-zA-Z0-9._-]+$")
-    priority: str = Field(pattern="^(low|medium|high)$")
-    status: str = Field(pattern="^(todo|in_progress|done)$")
-    due_date: str | None = None
-
-
-class TaskUpdate(BaseModel):
-    title: str | None = Field(default=None, min_length=2, max_length=120)
-    description: str | None = Field(default=None, max_length=500)
-    assignee: str | None = Field(default=None, min_length=2, max_length=40, pattern=r"^[a-zA-Z0-9._-]+$")
-    priority: str | None = Field(default=None, pattern="^(low|medium|high)$")
-    status: str | None = Field(default=None, pattern="^(todo|in_progress|done)$")
-    due_date: str | None = None
-
-
 class ChecklistItemCreate(BaseModel):
     stage: str = Field(pattern="^(data_acquisition|labeling|development)$")
     content: str = Field(min_length=1, max_length=200)
@@ -639,8 +620,10 @@ def dashboard(current_user: dict[str, Any] = Depends(get_current_user)) -> dict[
     with get_db() as conn:
         if current_user["is_admin"]:
             project_total = conn.execute("SELECT COUNT(*) AS c FROM projects").fetchone()["c"]
-            task_total = conn.execute("SELECT COUNT(*) AS c FROM tasks").fetchone()["c"]
-            task_done = conn.execute("SELECT COUNT(*) AS c FROM tasks WHERE status='done'").fetchone()["c"]
+            work_total = conn.execute("SELECT COUNT(*) AS c FROM project_checklist_items").fetchone()["c"]
+            work_done = conn.execute(
+                "SELECT COUNT(*) AS c FROM project_checklist_items WHERE is_done=1"
+            ).fetchone()["c"]
             active_projects = conn.execute(
                 "SELECT COUNT(*) AS c FROM projects WHERE status='active'"
             ).fetchone()["c"]
@@ -658,31 +641,37 @@ def dashboard(current_user: dict[str, Any] = Depends(get_current_user)) -> dict[
                 """,
                 (current_user["username"], current_user["username"]),
             ).fetchone()["c"]
-            task_total = conn.execute(
+            work_total = conn.execute(
                 """
                 SELECT COUNT(*) AS c
-                FROM tasks
-                WHERE tasks.project_id IN (
-                    SELECT DISTINCT p.id
-                    FROM projects p
-                    LEFT JOIN project_participants pp ON pp.project_id = p.id
-                    LEFT JOIN users u ON u.id = pp.user_id
-                    WHERE p.owner=? OR u.username=?
+                FROM project_checklist_items c
+                JOIN projects p ON p.id = c.project_id
+                WHERE (
+                    p.owner=?
+                    OR EXISTS (
+                        SELECT 1
+                        FROM project_participants pp
+                        JOIN users u ON u.id = pp.user_id
+                        WHERE pp.project_id = p.id AND u.username=?
+                    )
                 )
                 """,
                 (current_user["username"], current_user["username"]),
             ).fetchone()["c"]
-            task_done = conn.execute(
+            work_done = conn.execute(
                 """
                 SELECT COUNT(*) AS c
-                FROM tasks
-                WHERE tasks.status='done'
-                  AND tasks.project_id IN (
-                    SELECT DISTINCT p.id
-                    FROM projects p
-                    LEFT JOIN project_participants pp ON pp.project_id = p.id
-                    LEFT JOIN users u ON u.id = pp.user_id
-                    WHERE p.owner=? OR u.username=?
+                FROM project_checklist_items c
+                JOIN projects p ON p.id = c.project_id
+                WHERE c.is_done=1
+                  AND (
+                    p.owner=?
+                    OR EXISTS (
+                        SELECT 1
+                        FROM project_participants pp
+                        JOIN users u ON u.id = pp.user_id
+                        WHERE pp.project_id = p.id AND u.username=?
+                    )
                 )
                 """,
                 (current_user["username"], current_user["username"]),
@@ -701,11 +690,11 @@ def dashboard(current_user: dict[str, Any] = Depends(get_current_user)) -> dict[
                 (current_user["username"], current_user["username"]),
             ).fetchone()["c"]
 
-    completion_rate = 0 if task_total == 0 else round((task_done / task_total) * 100, 1)
+    completion_rate = 0 if work_total == 0 else round((work_done / work_total) * 100, 1)
     return {
         "projects": project_total,
         "active_projects": active_projects,
-        "tasks": task_total,
+        "tasks": work_total,
         "completion_rate": completion_rate,
     }
 
@@ -903,131 +892,6 @@ def delete_project(
         cur = conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="Project not found.")
-        conn.commit()
-    return {"ok": True}
-
-
-@app.get("/api/tasks")
-def list_tasks(
-    project_id: int | None = Query(default=None),
-    status: str | None = Query(default=None, pattern="^(todo|in_progress|done)$"),
-    current_user: dict[str, Any] = Depends(get_current_user),
-) -> list[dict[str, Any]]:
-    query = """
-    SELECT tasks.*, projects.name AS project_name
-    FROM tasks
-    JOIN projects ON projects.id = tasks.project_id
-    """
-    conditions: list[str] = []
-    values: list[Any] = []
-
-    if project_id is not None:
-        conditions.append("tasks.project_id=?")
-        values.append(project_id)
-    if status is not None:
-        conditions.append("tasks.status=?")
-        values.append(status)
-    if not current_user["is_admin"]:
-        conditions.append(
-            """
-            (
-                projects.owner=?
-                OR EXISTS (
-                    SELECT 1
-                    FROM project_participants pp
-                    JOIN users u ON u.id = pp.user_id
-                    WHERE pp.project_id = projects.id
-                      AND u.username=?
-                )
-            )
-            """
-        )
-        values.extend([current_user["username"], current_user["username"]])
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY tasks.id DESC"
-
-    with get_db() as conn:
-        rows = conn.execute(query, values).fetchall()
-    return [row_to_dict(row) for row in rows]
-
-
-@app.post("/api/tasks", status_code=201)
-def create_task(payload: TaskCreate, current_user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
-    with get_db() as conn:
-        project = require_project_access(conn, payload.project_id, current_user)
-        ensure_username_exists(conn, payload.assignee.strip())
-        cur = conn.execute(
-            """
-            INSERT INTO tasks (project_id, title, description, assignee, priority, status, due_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                payload.project_id,
-                payload.title.strip(),
-                payload.description.strip(),
-                payload.assignee.strip(),
-                payload.priority,
-                payload.status,
-                payload.due_date,
-            ),
-        )
-        conn.commit()
-        row = conn.execute(
-            """
-            SELECT tasks.*, projects.name AS project_name
-            FROM tasks JOIN projects ON projects.id = tasks.project_id
-            WHERE tasks.id=?
-            """,
-            (cur.lastrowid,),
-        ).fetchone()
-    return row_to_dict(row)
-
-
-@app.patch("/api/tasks/{task_id}")
-def update_task(
-    task_id: int, payload: TaskUpdate, current_user: dict[str, Any] = Depends(get_current_user)
-) -> dict[str, Any]:
-    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
-    if not updates:
-        raise HTTPException(status_code=400, detail="No fields to update.")
-
-    with get_db() as conn:
-        task = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-        if not task:
-            raise HTTPException(status_code=404, detail="Task not found.")
-        require_project_access(conn, int(task["project_id"]), current_user)
-        if "assignee" in updates:
-            assignee = str(updates["assignee"]).strip()
-            ensure_username_exists(conn, assignee)
-            updates["assignee"] = assignee
-        set_clause = ", ".join([f"{k}=?" for k in updates.keys()])
-        values = list(updates.values()) + [task_id]
-        cur = conn.execute(f"UPDATE tasks SET {set_clause} WHERE id=?", values)
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Task not found.")
-        conn.commit()
-        row = conn.execute(
-            """
-            SELECT tasks.*, projects.name AS project_name
-            FROM tasks JOIN projects ON projects.id = tasks.project_id
-            WHERE tasks.id=?
-            """,
-            (task_id,),
-        ).fetchone()
-    return row_to_dict(row)
-
-
-@app.delete("/api/tasks/{task_id}")
-def delete_task(task_id: int, current_user: dict[str, Any] = Depends(get_current_user)) -> dict[str, bool]:
-    with get_db() as conn:
-        task = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-        if not task:
-            raise HTTPException(status_code=404, detail="Task not found.")
-        require_project_access(conn, int(task["project_id"]), current_user)
-        cur = conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Task not found.")
         conn.commit()
     return {"ok": True}
 

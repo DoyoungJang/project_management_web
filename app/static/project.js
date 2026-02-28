@@ -259,7 +259,7 @@ function renderStage(stage) {
   const items = checklistItems.filter((x) => x.stage === stage.key);
   const listHtml =
     items.length === 0
-      ? "<div class='item__meta'>체크리스트 항목이 없습니다.</div>"
+      ? "<div class='item__meta'>작업 항목이 없습니다.</div>"
       : items
           .map(
             (item) => `
@@ -287,7 +287,7 @@ function renderStage(stage) {
       <h3>${stage.title}</h3>
       <div class="check-list">${listHtml}</div>
       <form class="check-form with-date" data-stage-form="${stage.key}">
-        <input name="content" placeholder="체크리스트 항목 입력" required minlength="1" maxlength="200" />
+        <input name="content" placeholder="작업 항목 입력" required minlength="1" maxlength="200" />
         <input name="target_date" type="date" />
         <select name="workflow_status">
           <option value="upcoming">Upcoming</option>
@@ -498,7 +498,7 @@ els.participantList?.addEventListener("click", async (e) => {
 els.applyTemplateBtn.addEventListener("click", async () => {
   const templateId = Number(els.templateSelect.value);
   if (!templateId) return;
-  if (!confirm("현재 체크리스트를 지우고 선택한 템플릿으로 적용할까요?")) return;
+  if (!confirm("현재 작업 항목을 지우고 선택한 템플릿으로 적용할까요?")) return;
   await api.post(`/api/projects/${projectId}/apply-template/${templateId}`, {});
   await loadChecklist();
   await loadRulesAndPreview();
@@ -575,7 +575,7 @@ els.stages?.addEventListener("click", async (e) => {
     const input = els.stages.querySelector(`[data-content-list="${id}"]`);
     const content = (input.value || "").trim();
     if (!content) {
-      alert("체크리스트 항목 내용을 입력해 주세요.");
+      alert("작업 항목 내용을 입력해 주세요.");
       input.focus();
       return;
     }
@@ -598,7 +598,7 @@ els.stages?.addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-del-item]");
   if (!btn) return;
   const itemId = btn.getAttribute("data-del-item");
-  if (!confirm("체크리스트 항목을 삭제할까요?")) return;
+  if (!confirm("작업 항목을 삭제할까요?")) return;
   await api.del(`/api/checklists/${itemId}`);
   await loadChecklist();
   await loadRulesAndPreview();
@@ -630,7 +630,7 @@ els.board?.addEventListener("click", async (e) => {
     const input = els.board.querySelector(`[data-content-board="${id}"]`);
     const content = (input.value || "").trim();
     if (!content) {
-      alert("체크리스트 항목 내용을 입력해 주세요.");
+      alert("작업 항목 내용을 입력해 주세요.");
       input.focus();
       return;
     }

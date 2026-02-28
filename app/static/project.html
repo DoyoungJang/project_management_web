@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>체크리스트 보드</title>
+    <title>작업 보드</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
@@ -18,12 +18,12 @@
             <button id="logout-btn" type="button">로그아웃</button>
           </div>
         </div>
-        <h1 id="project-title">체크리스트 보드</h1>
+        <h1 id="project-title">작업 보드</h1>
         <p>Drag & Drop으로 상태를 변경합니다. 프로젝트 정보 수정은 프로젝트 설정에서 진행하세요.</p>
         <div class="settings-callout">
           <div>
             <strong>프로젝트 내용 변경이 필요하면?</strong>
-            <div>Owner, 참가자, 템플릿, 알림, 체크리스트 편집은 설정 페이지에서 관리합니다.</div>
+            <div>Owner, 참가자, 템플릿, 알림, 작업 편집은 설정 페이지에서 관리합니다.</div>
           </div>
           <a id="project-settings-link" class="btn-link btn-link--settings" href="#">프로젝트 설정 열기</a>
         </div>
@@ -32,7 +32,7 @@
 
     <main class="layout">
       <section class="panel">
-        <h2>체크리스트 보드 (Drag & Drop)</h2>
+        <h2>작업 보드 (Drag & Drop)</h2>
         <div id="kanban-board" class="kanban-board">
           <div class="kanban-col" data-status="upcoming">
             <h3>Upcoming</h3>
@@ -50,6 +50,6 @@
       </section>
     </main>
 
-    <script src="/static/project_board.js?v=20260225_1"></script>
+    <script src="/static/project_board.js?v=20260228_1"></script>
   </body>
 </html>

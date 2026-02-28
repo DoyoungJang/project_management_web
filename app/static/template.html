@@ -1,9 +1,9 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>체크리스트 템플릿 관리</title>
+    <title>작업 템플릿 관리</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
@@ -16,7 +16,7 @@
             <button id="logout-btn" type="button">로그아웃</button>
           </div>
         </div>
-        <h1>체크리스트 템플릿 관리</h1>
+        <h1>작업 템플릿 관리</h1>
       </div>
     </header>
 
@@ -26,7 +26,7 @@
         <form id="template-create-form" class="form-grid">
           <input name="name" placeholder="템플릿 이름" required minlength="2" />
           <input name="description" placeholder="템플릿 설명" />
-          <button type="submit">저장</button>
+          <button type="submit">생성</button>
         </form>
       </section>
 
@@ -36,19 +36,19 @@
       </section>
 
       <section id="template-detail-panel" class="panel hidden">
-        <h2>템플릿 조정</h2>
+        <h2>템플릿 편집</h2>
         <form id="template-update-form" class="form-grid">
           <input name="name" placeholder="템플릿 이름" required minlength="2" />
           <input name="description" placeholder="템플릿 설명" />
-          <button type="submit">정보 저장</button>
+          <button type="submit">저장</button>
         </form>
-        <div class="actions" style="margin-top: 10px;">
+        <div class="actions" style="margin-top: 10px">
           <button id="template-delete-btn" type="button" class="danger">템플릿 삭제</button>
         </div>
-        <div id="template-stage-container" class="stage-container" style="margin-top: 12px;"></div>
+        <div id="template-stage-container" class="stage-container" style="margin-top: 12px"></div>
       </section>
     </main>
 
-    <script src="/static/template.js"></script>
+    <script src="/static/template.js?v=20260228_1"></script>
   </body>
 </html>

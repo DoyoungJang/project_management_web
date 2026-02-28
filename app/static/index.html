@@ -32,7 +32,7 @@
 
       <section class="panel">
         <div class="panel__header">
-          <h2>내 프로젝트 마감 임박 체크리스트</h2>
+          <h2>내 프로젝트 마감 임박 작업</h2>
           <div id="upcoming-filter" class="segmented">
             <button type="button" class="segmented__btn is-active" data-upcoming-filter="all">
               전체 <span id="upcoming-count-all" class="segmented__count">0</span>
@@ -65,48 +65,13 @@
       </section>
 
       <section class="panel">
-        <h2>작업 등록</h2>
-        <form id="task-form" class="form-grid">
-          <select name="project_id" id="task-project-select" required></select>
-          <input name="title" placeholder="작업명" required minlength="2" />
-          <input name="assignee" placeholder="assignee username" required minlength="2" />
-          <input name="due_date" type="date" />
-          <select name="priority">
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-          <select name="status">
-            <option value="todo">Todo</option>
-            <option value="in_progress">In Progress</option>
-            <option value="done">Done</option>
-          </select>
-          <textarea name="description" placeholder="상세 설명"></textarea>
-          <button type="submit">작업 추가</button>
-        </form>
-      </section>
-
-      <section class="panel">
         <div class="panel__header">
           <h2>프로젝트 목록</h2>
         </div>
         <div id="project-list" class="list"></div>
       </section>
-
-      <section class="panel">
-        <div class="panel__header">
-          <h2>작업 목록</h2>
-          <select id="task-filter-status">
-            <option value="">전체</option>
-            <option value="todo">Todo</option>
-            <option value="in_progress">In Progress</option>
-            <option value="done">Done</option>
-          </select>
-        </div>
-        <div id="task-list" class="list"></div>
-      </section>
     </main>
 
-    <script src="/static/app.js?v=20260225_9"></script>
+    <script src="/static/app.js?v=20260228_1"></script>
   </body>
 </html>

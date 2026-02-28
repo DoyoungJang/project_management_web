@@ -92,7 +92,7 @@ async function loadSession() {
 
 async function loadProject() {
   const project = await api.get(`/api/projects/${projectId}`);
-  els.title.textContent = `${project.name || "프로젝트"} - 체크리스트 보드`;
+  els.title.textContent = `${project.name || "프로젝트"} - 작업 보드`;
   if (els.settingsLink) {
     els.settingsLink.href = `/static/project_settings.html?project_id=${projectId}`;
   }
@@ -111,7 +111,7 @@ function renderBoard() {
       .sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
 
     if (!items.length) {
-      zone.innerHTML = "<div class='item__meta'>항목이 없습니다.</div>";
+      zone.innerHTML = "<div class='item__meta'>작업이 없습니다.</div>";
       continue;
     }
 

@@ -41,11 +41,7 @@ const els = {
     rate: document.getElementById("stat-rate"),
   },
   projectForm: document.getElementById("project-form"),
-  taskForm: document.getElementById("task-form"),
   projectList: document.getElementById("project-list"),
-  taskList: document.getElementById("task-list"),
-  taskProjectSelect: document.getElementById("task-project-select"),
-  taskFilterStatus: document.getElementById("task-filter-status"),
   upcomingFilter: document.getElementById("upcoming-filter"),
   upcomingCountAll: document.getElementById("upcoming-count-all"),
   upcomingCountOwner: document.getElementById("upcoming-count-owner"),
@@ -53,7 +49,6 @@ const els = {
 };
 
 let projects = [];
-let tasks = [];
 let currentUser = null;
 let upcomingItems = [];
 let upcomingRelationFilter = "all";
@@ -72,8 +67,6 @@ function statusLabel(raw) {
     planned: "Planned",
     active: "Active",
     done: "Done",
-    todo: "Todo",
-    in_progress: "In Progress",
   };
   return map[raw] || raw;
 }
@@ -102,10 +95,6 @@ function relationBadgeClass(raw) {
   return "";
 }
 
-function priorityLabel(raw) {
-  return raw.charAt(0).toUpperCase() + raw.slice(1);
-}
-
 function parseApiError(error) {
   try {
     const parsed = JSON.parse(String(error.message || ""));
@@ -116,7 +105,7 @@ function parseApiError(error) {
   return String(error.message || "요청 처리 중 오류가 발생했습니다.");
 }
 
-function renderTodayNotifications(items) {
+function renderUpcomingItems(items) {
   upcomingItems = Array.isArray(items) ? items : [];
 
   const ownerCount = upcomingItems.filter((x) => x.membership_type === "owner").length;
@@ -133,12 +122,12 @@ function renderTodayNotifications(items) {
   if (!visibleItems.length) {
     const emptyText =
       upcomingItems.length === 0
-        ? "마감 임박 체크리스트가 없습니다."
+        ? "마감 임박 작업이 없습니다."
         : upcomingRelationFilter === "owner"
-          ? "Owner 프로젝트의 마감 임박 체크리스트가 없습니다."
+          ? "Owner 프로젝트의 마감 임박 작업이 없습니다."
           : upcomingRelationFilter === "participant"
-            ? "참가자 프로젝트의 마감 임박 체크리스트가 없습니다."
-            : "표시할 체크리스트가 없습니다.";
+            ? "참가자 프로젝트의 마감 임박 작업이 없습니다."
+            : "표시할 작업이 없습니다.";
     els.todayNotifications.innerHTML = `<div class='item'>${emptyText}</div>`;
     return;
   }
@@ -162,7 +151,7 @@ function renderTodayNotifications(items) {
           <button
             type="button"
             data-open-upcoming-project="${x.project_id}"
-            data-open-upcoming-checklist="${x.checklist_id}"
+            data-open-upcoming-item="${x.checklist_id}"
           >
             프로젝트 보기
           </button>
@@ -182,9 +171,6 @@ async function loadSession() {
   if (els.projectForm?.elements?.owner) {
     els.projectForm.elements.owner.value = me.username;
   }
-  if (els.taskForm?.elements?.assignee) {
-    els.taskForm.elements.assignee.value = me.username;
-  }
 }
 
 async function loadDashboard() {
@@ -195,33 +181,14 @@ async function loadDashboard() {
   els.dashboard.rate.textContent = `${data.completion_rate}%`;
 }
 
-async function loadTodayNotifications() {
+async function loadUpcomingItems() {
   const items = await api.get("/api/my/checklists/upcoming?days=30");
-  renderTodayNotifications(items);
+  renderUpcomingItems(items);
 }
 
 async function loadProjects() {
   projects = await api.get("/api/projects");
   renderProjects();
-  renderProjectSelect();
-}
-
-async function loadTasks() {
-  const status = els.taskFilterStatus.value;
-  const query = status ? `?status=${encodeURIComponent(status)}` : "";
-  tasks = await api.get(`/api/tasks${query}`);
-  renderTasks();
-}
-
-function renderProjectSelect() {
-  if (projects.length === 0) {
-    els.taskProjectSelect.innerHTML = "<option value=''>프로젝트를 먼저 생성하세요</option>";
-    return;
-  }
-
-  els.taskProjectSelect.innerHTML = projects
-    .map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`)
-    .join("");
 }
 
 function renderProjects() {
@@ -231,10 +198,9 @@ function renderProjects() {
   }
 
   els.projectList.innerHTML = projects
-    .map(
-      (p) => {
-        const canDelete = Boolean(currentUser && (currentUser.is_admin || currentUser.username === p.owner));
-        return `
+    .map((p) => {
+      const canDelete = Boolean(currentUser && (currentUser.is_admin || currentUser.username === p.owner));
+      return `
       <div class="item">
         <div class="item__head">
           <strong>${escapeHtml(p.name)}</strong>
@@ -249,35 +215,7 @@ function renderProjects() {
         </div>
       </div>
     `;
-      }
-    )
-    .join("");
-}
-
-function renderTasks() {
-  if (tasks.length === 0) {
-    els.taskList.innerHTML = "<div class='item'>등록된 작업이 없습니다.</div>";
-    return;
-  }
-
-  els.taskList.innerHTML = tasks
-    .map(
-      (t) => `
-      <div class="item">
-        <div class="item__head">
-          <strong>${escapeHtml(t.title)}</strong>
-          <span class="badge">${statusLabel(t.status)}</span>
-        </div>
-        <div>${escapeHtml(t.description || "-")}</div>
-        <div class="item__meta">
-          프로젝트: ${escapeHtml(t.project_name)} | 담당: ${escapeHtml(t.assignee)} | 우선순위: ${priorityLabel(t.priority)} | 마감: ${escapeHtml(t.due_date || "-")}
-        </div>
-        <div class="actions">
-          <button class="danger" data-del-task="${t.id}">삭제</button>
-        </div>
-      </div>
-    `
-    )
+    })
     .join("");
 }
 
@@ -286,7 +224,7 @@ els.logoutBtn.addEventListener("click", async () => {
   window.location.href = "/static/login.html";
 });
 
-els.projectForm.addEventListener("submit", async (e) => {
+els.projectForm?.addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
     const payload = Object.fromEntries(new FormData(els.projectForm).entries());
@@ -308,8 +246,8 @@ els.projectForm.addEventListener("submit", async (e) => {
       els.projectForm.elements[first.key]?.focus();
       return;
     }
-    await api.post("/api/projects", payload);
 
+    await api.post("/api/projects", payload);
     els.projectForm.reset();
     if (currentUser && els.projectForm?.elements?.owner) {
       els.projectForm.elements.owner.value = currentUser.username;
@@ -320,31 +258,7 @@ els.projectForm.addEventListener("submit", async (e) => {
   }
 });
 
-els.taskForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  try {
-    if (projects.length === 0) {
-      alert("프로젝트를 먼저 생성하세요.");
-      return;
-    }
-
-    const payload = Object.fromEntries(new FormData(els.taskForm).entries());
-    payload.project_id = Number(payload.project_id);
-    if (!payload.due_date) payload.due_date = null;
-
-    await api.post("/api/tasks", payload);
-
-    els.taskForm.reset();
-    if (currentUser && els.taskForm?.elements?.assignee) {
-      els.taskForm.elements.assignee.value = currentUser.username;
-    }
-    await refreshAll();
-  } catch (err) {
-    alert(parseApiError(err));
-  }
-});
-
-els.projectList.addEventListener("click", async (e) => {
+els.projectList?.addEventListener("click", async (e) => {
   const openBtn = e.target.closest("[data-open-project]");
   if (openBtn) {
     const id = openBtn.getAttribute("data-open-project");
@@ -364,6 +278,7 @@ els.projectList.addEventListener("click", async (e) => {
 
   const id = delBtn.getAttribute("data-del-project");
   if (!confirm("프로젝트를 삭제하면 관련 작업도 함께 삭제됩니다. 계속할까요?")) return;
+
   const password = prompt("프로젝트 삭제를 위해 본인 비밀번호를 입력하세요.");
   if (password === null) return;
   if (!String(password).trim()) {
@@ -379,24 +294,13 @@ els.projectList.addEventListener("click", async (e) => {
   }
 });
 
-els.taskList.addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-del-task]");
-  if (!btn) return;
-
-  const id = btn.getAttribute("data-del-task");
-  if (!confirm("작업을 삭제할까요?")) return;
-
-  await api.del(`/api/tasks/${id}`);
-  await refreshAll();
-});
-
-els.todayNotifications.addEventListener("click", (e) => {
+els.todayNotifications?.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-open-upcoming-project]");
   if (!btn) return;
 
   const projectId = btn.getAttribute("data-open-upcoming-project");
-  const checklistId = btn.getAttribute("data-open-upcoming-checklist");
-  window.location.href = `/static/project.html?project_id=${projectId}&checklist_id=${checklistId}`;
+  const itemId = btn.getAttribute("data-open-upcoming-item");
+  window.location.href = `/static/project.html?project_id=${projectId}&checklist_id=${itemId}`;
 });
 
 els.upcomingFilter?.addEventListener("click", (e) => {
@@ -407,13 +311,11 @@ els.upcomingFilter?.addEventListener("click", (e) => {
   els.upcomingFilter.querySelectorAll("[data-upcoming-filter]").forEach((x) => {
     x.classList.toggle("is-active", x.getAttribute("data-upcoming-filter") === filter);
   });
-  renderTodayNotifications(upcomingItems);
+  renderUpcomingItems(upcomingItems);
 });
 
-els.taskFilterStatus.addEventListener("change", loadTasks);
-
 async function refreshAll() {
-  await Promise.all([loadDashboard(), loadProjects(), loadTasks(), loadTodayNotifications()]);
+  await Promise.all([loadDashboard(), loadProjects(), loadUpcomingItems()]);
 }
 
 Promise.resolve()
