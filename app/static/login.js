@@ -34,14 +34,19 @@ async function registerLocal(payload) {
   });
 }
 
+function redirectAfterLogin(loginResult) {
+  const isAdmin = Boolean(loginResult?.user?.is_admin);
+  window.location.href = isAdmin ? "/static/admin.html" : "/";
+}
+
 loginForm?.addEventListener("submit", async (e) => {
   e.preventDefault();
   const payload = Object.fromEntries(new FormData(loginForm).entries());
   payload.username = String(payload.username || "").trim();
 
   try {
-    await loginLocal(payload);
-    window.location.href = "/";
+    const loginResult = await loginLocal(payload);
+    redirectAfterLogin(loginResult);
   } catch (err) {
     alert(`로그인 실패: ${parseApiError(err)}`);
   }
@@ -69,8 +74,8 @@ registerForm?.addEventListener("submit", async (e) => {
       password,
     });
 
-    await loginLocal({ username: payload.username, password });
-    window.location.href = "/";
+    const loginResult = await loginLocal({ username: payload.username, password });
+    redirectAfterLogin(loginResult);
   } catch (err) {
     alert(`회원가입 실패: ${parseApiError(err)}`);
   }

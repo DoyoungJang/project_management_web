@@ -13,7 +13,7 @@
           <a class="btn-link" href="/">대시보드로 돌아가기</a>
           <button id="logout-btn" type="button">로그아웃</button>
         </div>
-        <h1>Admin - 사용자 관리</h1>
+        <h1>Admin - 사용자/프로젝트 관리</h1>
       </div>
     </header>
 
@@ -34,7 +34,15 @@
         <h2>사용자 목록</h2>
         <div id="users-list" class="list"></div>
       </section>
+
+      <section class="panel">
+        <div class="panel__header">
+          <h2>프로젝트 관리</h2>
+          <button id="reload-projects-btn" type="button">새로고침</button>
+        </div>
+        <div id="projects-list" class="list"></div>
+      </section>
     </main>
-    <script src="/static/admin.js?v=20260228_1"></script>
+    <script src="/static/admin.js?v=20260228_2"></script>
   </body>
 </html>
