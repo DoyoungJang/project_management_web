@@ -2,7 +2,7 @@
 const registerForm = document.getElementById("register-form");
 
 async function request(url, options = {}) {
-  const res = await fetch(url, options);
+  const res = await fetch(url, { credentials: "same-origin", ...options });
   if (!res.ok) throw new Error(await res.text());
   const text = await res.text();
   return text ? JSON.parse(text) : {};

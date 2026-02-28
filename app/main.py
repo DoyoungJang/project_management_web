@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import secrets
 import sqlite3
 import time
@@ -9,26 +10,134 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Response
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
 DB_PATH = BASE_DIR / "project_manager.db"
 STATIC_DIR = BASE_DIR / "static"
 SESSION_HOURS = 12
+SESSION_COOKIE_NAME = "session_token"
+CSRF_COOKIE_NAME = "csrf_token"
+SAFE_SAMESITE_VALUES = {"lax", "strict", "none"}
+DEFAULT_CORS_ORIGINS = ["http://127.0.0.1:8000", "http://127.0.0.1:8080", "http://localhost:8000", "http://localhost:8080"]
+CSRF_EXEMPT_PATHS = {"/api/auth/login", "/api/auth/register", "/api/health"}
+
+
+def load_env_file(env_path: Path) -> None:
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+load_env_file(PROJECT_ROOT / ".env")
+
+
+def parse_bool_env(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def parse_int_env(name: str, default: str, min_value: int, max_value: int) -> int:
+    raw = os.getenv(name, default).strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = int(default)
+    if value < min_value:
+        return min_value
+    if value > max_value:
+        return max_value
+    return value
+
+
+def parse_allowed_origins(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+CORS_ALLOW_ORIGINS = parse_allowed_origins(os.getenv("CORS_ALLOW_ORIGINS")) or DEFAULT_CORS_ORIGINS
+SESSION_COOKIE_SECURE = parse_bool_env("SESSION_COOKIE_SECURE", "0")
+SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "lax").strip().lower()
+if SESSION_COOKIE_SAMESITE not in SAFE_SAMESITE_VALUES:
+    SESSION_COOKIE_SAMESITE = "lax"
+LOGIN_WINDOW_SECONDS = parse_int_env("LOGIN_WINDOW_SECONDS", "300", 60, 86400)
+LOGIN_LOCKOUT_SECONDS = parse_int_env("LOGIN_LOCKOUT_SECONDS", "900", 60, 604800)
+LOGIN_MAX_ATTEMPTS_USER_IP = parse_int_env("LOGIN_MAX_ATTEMPTS_USER_IP", "5", 1, 100)
+LOGIN_MAX_ATTEMPTS_IP = parse_int_env("LOGIN_MAX_ATTEMPTS_IP", "20", 1, 300)
+
+CSP_POLICY = (
+    "default-src 'self'; "
+    "img-src 'self' data:; "
+    "style-src 'self' 'unsafe-inline'; "
+    "script-src 'self' 'unsafe-inline'; "
+    "connect-src 'self'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "frame-ancestors 'none'"
+)
 
 app = FastAPI(title="Project Management API", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ALLOW_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-CSRF-Token"],
 )
+
+
+@app.middleware("http")
+async def security_middleware(request: Request, call_next):
+    path = request.url.path
+    method = request.method.upper()
+
+    if path.startswith("/api/") and method in {"POST", "PUT", "PATCH", "DELETE"} and path not in CSRF_EXEMPT_PATHS:
+        session_token = request.cookies.get(SESSION_COOKIE_NAME)
+        if session_token:
+            csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME, "")
+            csrf_header = request.headers.get("X-CSRF-Token", "")
+
+            if not csrf_cookie or not csrf_header or not hmac.compare_digest(csrf_cookie, csrf_header):
+                return JSONResponse(status_code=403, content={"detail": "CSRF validation failed."})
+
+            with get_db() as conn:
+                session = conn.execute(
+                    "SELECT csrf_token, expires_at FROM user_sessions WHERE session_token=?",
+                    (session_token,),
+                ).fetchone()
+
+            now_ts = int(time.time())
+            if not session or int(session["expires_at"]) <= now_ts:
+                return JSONResponse(status_code=401, content={"detail": "Invalid or expired session."})
+
+            db_csrf = str(session["csrf_token"] or "")
+            if not db_csrf or not hmac.compare_digest(db_csrf, csrf_cookie):
+                return JSONResponse(status_code=403, content={"detail": "CSRF validation failed."})
+
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+    response.headers.setdefault("Content-Security-Policy", CSP_POLICY)
+    if request.url.scheme == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
 
 
 @contextmanager
@@ -85,9 +194,18 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 session_token TEXT NOT NULL UNIQUE,
+                csrf_token TEXT NOT NULL,
                 expires_at INTEGER NOT NULL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS login_rate_limits (
+                key TEXT PRIMARY KEY,
+                fail_count INTEGER NOT NULL DEFAULT 0,
+                window_start INTEGER NOT NULL,
+                locked_until INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS projects (
@@ -171,8 +289,26 @@ def init_db() -> None:
 
         ensure_column(conn, "users", "auth_provider", "TEXT NOT NULL DEFAULT 'local'")
         ensure_column(conn, "users", "email", "TEXT")
+        ensure_column(conn, "user_sessions", "csrf_token", "TEXT")
         ensure_column(conn, "project_checklist_items", "target_date", "TEXT")
         ensure_column(conn, "project_checklist_items", "workflow_status", "TEXT NOT NULL DEFAULT 'upcoming'")
+        stale_sessions = conn.execute(
+            "SELECT id FROM user_sessions WHERE csrf_token IS NULL OR csrf_token=''"
+        ).fetchall()
+        for session_row in stale_sessions:
+            conn.execute(
+                "UPDATE user_sessions SET csrf_token=? WHERE id=?",
+                (secrets.token_urlsafe(32), session_row["id"]),
+            )
+        now_ts = int(time.time())
+        conn.execute(
+            """
+            DELETE FROM login_rate_limits
+            WHERE locked_until < ?
+              AND updated_at < ?
+            """,
+            (now_ts, now_ts - max(LOGIN_WINDOW_SECONDS, LOGIN_LOCKOUT_SECONDS) * 2),
+        )
         conn.execute(
             """
             UPDATE projects
@@ -211,14 +347,27 @@ def init_db() -> None:
 
         admin_exists = conn.execute("SELECT id FROM users WHERE is_admin=1 LIMIT 1").fetchone()
         if not admin_exists:
+            bootstrap_username = os.getenv("BOOTSTRAP_ADMIN_USERNAME", "admin").strip() or "admin"
+            bootstrap_display = os.getenv("BOOTSTRAP_ADMIN_DISPLAY_NAME", "System Admin").strip() or "System Admin"
+            bootstrap_password = (os.getenv("BOOTSTRAP_ADMIN_PASSWORD") or "").strip()
+            generated = False
+            if not bootstrap_password:
+                bootstrap_password = secrets.token_urlsafe(16)
+                generated = True
             conn.execute(
                 """
                 INSERT INTO users (username, display_name, password_hash, is_admin)
                 VALUES (?, ?, ?, 1)
                 """,
-                ("admin", "System Admin", hash_password("admin123!")),
+                (bootstrap_username, bootstrap_display, hash_password(bootstrap_password)),
             )
             conn.commit()
+            if generated:
+                print(
+                    "[SECURITY] Initial admin account created. "
+                    f"username={bootstrap_username}, temporary_password={bootstrap_password}. "
+                    "Please change this password immediately."
+                )
 
 
 def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -237,15 +386,144 @@ def user_public(user_row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def create_session(conn: sqlite3.Connection, user_id: int) -> tuple[str, int]:
+def set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=SESSION_COOKIE_SECURE,
+        samesite=SESSION_COOKIE_SAMESITE,
+        max_age=SESSION_HOURS * 60 * 60,
+        path="/",
+    )
+
+
+def set_csrf_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=CSRF_COOKIE_NAME,
+        value=token,
+        httponly=False,
+        secure=SESSION_COOKIE_SECURE,
+        samesite=SESSION_COOKIE_SAMESITE,
+        max_age=SESSION_HOURS * 60 * 60,
+        path="/",
+    )
+
+
+def ensure_session_csrf_token(conn: sqlite3.Connection, session_token: str) -> str | None:
+    row = conn.execute("SELECT id, csrf_token FROM user_sessions WHERE session_token=?", (session_token,)).fetchone()
+    if not row:
+        return None
+    csrf_token = str(row["csrf_token"] or "").strip()
+    if csrf_token:
+        return csrf_token
+    csrf_token = secrets.token_urlsafe(32)
+    conn.execute("UPDATE user_sessions SET csrf_token=? WHERE id=?", (csrf_token, row["id"]))
+    conn.commit()
+    return csrf_token
+
+
+def get_client_ip(request: Request) -> str:
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def login_limit_keys(username: str, ip_addr: str) -> tuple[str, str]:
+    user_key = f"user_ip:{username.strip().lower()}|{ip_addr}"
+    ip_key = f"ip:{ip_addr}"
+    return user_key, ip_key
+
+
+def get_lock_seconds_remaining(conn: sqlite3.Connection, key: str, now_ts: int) -> int:
+    row = conn.execute(
+        "SELECT locked_until FROM login_rate_limits WHERE key=?",
+        (key,),
+    ).fetchone()
+    if not row:
+        return 0
+    locked_until = int(row["locked_until"] or 0)
+    if locked_until <= now_ts:
+        return 0
+    return locked_until - now_ts
+
+
+def apply_login_failure(
+    conn: sqlite3.Connection, key: str, max_attempts: int, now_ts: int
+) -> None:
+    row = conn.execute(
+        """
+        SELECT fail_count, window_start, locked_until
+        FROM login_rate_limits
+        WHERE key=?
+        """,
+        (key,),
+    ).fetchone()
+    if not row:
+        conn.execute(
+            """
+            INSERT INTO login_rate_limits (key, fail_count, window_start, locked_until, updated_at)
+            VALUES (?, 1, ?, 0, ?)
+            """,
+            (key, now_ts, now_ts),
+        )
+        return
+
+    fail_count = int(row["fail_count"] or 0)
+    window_start = int(row["window_start"] or now_ts)
+    locked_until = int(row["locked_until"] or 0)
+
+    if now_ts - window_start > LOGIN_WINDOW_SECONDS:
+        fail_count = 1
+        window_start = now_ts
+        locked_until = 0
+    else:
+        fail_count += 1
+
+    if fail_count >= max_attempts:
+        locked_until = max(locked_until, now_ts + LOGIN_LOCKOUT_SECONDS)
+
+    conn.execute(
+        """
+        UPDATE login_rate_limits
+        SET fail_count=?, window_start=?, locked_until=?, updated_at=?
+        WHERE key=?
+        """,
+        (fail_count, window_start, locked_until, now_ts, key),
+    )
+
+
+def record_login_failure(conn: sqlite3.Connection, username: str, ip_addr: str, now_ts: int) -> None:
+    user_key, ip_key = login_limit_keys(username, ip_addr)
+    apply_login_failure(conn, user_key, LOGIN_MAX_ATTEMPTS_USER_IP, now_ts)
+    apply_login_failure(conn, ip_key, LOGIN_MAX_ATTEMPTS_IP, now_ts)
+    conn.commit()
+
+
+def clear_login_failures(conn: sqlite3.Connection, username: str, ip_addr: str) -> None:
+    user_key, ip_key = login_limit_keys(username, ip_addr)
+    conn.execute("DELETE FROM login_rate_limits WHERE key IN (?, ?)", (user_key, ip_key))
+    conn.commit()
+
+
+def get_login_lock_remaining(conn: sqlite3.Connection, username: str, ip_addr: str, now_ts: int) -> int:
+    user_key, ip_key = login_limit_keys(username, ip_addr)
+    return max(
+        get_lock_seconds_remaining(conn, user_key, now_ts),
+        get_lock_seconds_remaining(conn, ip_key, now_ts),
+    )
+
+
+def create_session(conn: sqlite3.Connection, user_id: int) -> tuple[str, int, str]:
     token = secrets.token_urlsafe(36)
+    csrf_token = secrets.token_urlsafe(32)
     expires_at = int(time.time()) + (SESSION_HOURS * 60 * 60)
     conn.execute(
-        "INSERT INTO user_sessions (user_id, session_token, expires_at) VALUES (?, ?, ?)",
-        (user_id, token, expires_at),
+        "INSERT INTO user_sessions (user_id, session_token, csrf_token, expires_at) VALUES (?, ?, ?, ?)",
+        (user_id, token, csrf_token, expires_at),
     )
     conn.commit()
-    return token, expires_at
+    return token, expires_at, csrf_token
 
 
 def find_session_user(conn: sqlite3.Connection, session_token: str) -> sqlite3.Row | None:
@@ -263,7 +541,9 @@ def find_session_user(conn: sqlite3.Connection, session_token: str) -> sqlite3.R
     return row
 
 
-def get_current_user(session_token: str | None = Cookie(default=None)) -> dict[str, Any]:
+def get_current_user(
+    session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, Any]:
     if not session_token:
         raise HTTPException(status_code=401, detail="Authentication required.")
     with get_db() as conn:
@@ -348,17 +628,20 @@ def require_project_access(
 
 
 class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=2, max_length=40)
     password: str = Field(min_length=6, max_length=128)
 
 
 class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=2, max_length=40, pattern=r"^[a-zA-Z0-9._-]+$")
     display_name: str = Field(min_length=2, max_length=60)
     password: str = Field(min_length=6, max_length=128)
 
 
 class AdminUserCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=2, max_length=40, pattern=r"^[a-zA-Z0-9._-]+$")
     display_name: str = Field(min_length=2, max_length=60)
     password: str = Field(min_length=6, max_length=128)
@@ -367,6 +650,7 @@ class AdminUserCreate(BaseModel):
 
 
 class AdminUserUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     display_name: str | None = Field(default=None, min_length=2, max_length=60)
     password: str | None = Field(default=None, min_length=6, max_length=128)
     email: str | None = Field(default=None, max_length=120)
@@ -374,6 +658,7 @@ class AdminUserUpdate(BaseModel):
 
 
 class ProjectCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=2, max_length=100)
     description: str = Field(default="", max_length=500)
     owner: str = Field(min_length=2, max_length=40, pattern=r"^[a-zA-Z0-9._-]+$")
@@ -382,6 +667,7 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str | None = Field(default=None, min_length=2, max_length=100)
     description: str | None = Field(default=None, max_length=500)
     owner: str | None = Field(default=None, min_length=2, max_length=40, pattern=r"^[a-zA-Z0-9._-]+$")
@@ -390,10 +676,12 @@ class ProjectUpdate(BaseModel):
 
 
 class ProjectDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     password: str = Field(min_length=1, max_length=128)
 
 
 class ChecklistItemCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     stage: str = Field(pattern="^(data_acquisition|labeling|development)$")
     content: str = Field(min_length=1, max_length=200)
     target_date: str | None = None
@@ -401,6 +689,7 @@ class ChecklistItemCreate(BaseModel):
 
 
 class ChecklistItemUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     content: str | None = Field(default=None, min_length=1, max_length=200)
     is_done: bool | None = None
     position: int | None = Field(default=None, ge=0)
@@ -409,35 +698,42 @@ class ChecklistItemUpdate(BaseModel):
 
 
 class NotificationRuleCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     days_before: int = Field(ge=0, le=365)
 
 
 class ParticipantCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=2, max_length=40, pattern=r"^[a-zA-Z0-9._-]+$")
 
 
 class TemplateCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=2, max_length=80)
     description: str = Field(default="", max_length=300)
 
 
 class TemplateUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str | None = Field(default=None, min_length=2, max_length=80)
     description: str | None = Field(default=None, max_length=300)
 
 
 class TemplateItemCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     stage: str = Field(pattern="^(data_acquisition|labeling|development)$")
     content: str = Field(min_length=1, max_length=200)
 
 
 class TemplateItemDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     stage: str = Field(pattern="^(data_acquisition|labeling|development)$")
     content: str = Field(min_length=1, max_length=200)
     position: int = Field(ge=0)
 
 
 class TemplateItemsReplaceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     items: list[TemplateItemDraft]
 
 
@@ -452,25 +748,31 @@ def health() -> dict[str, str]:
 
 
 @app.post("/api/auth/login")
-def login(payload: LoginRequest, response: Response) -> dict[str, Any]:
+def login(payload: LoginRequest, request: Request, response: Response) -> dict[str, Any]:
+    username = payload.username.strip()
+    ip_addr = get_client_ip(request)
+    now_ts = int(time.time())
+
     with get_db() as conn:
+        lock_remaining = get_login_lock_remaining(conn, username, ip_addr, now_ts)
+        if lock_remaining > 0:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Too many login attempts. Try again in {lock_remaining} seconds.",
+                headers={"Retry-After": str(lock_remaining)},
+            )
         user = conn.execute(
             "SELECT * FROM users WHERE username=? AND (auth_provider='local' OR auth_provider IS NULL)",
-            (payload.username.strip(),),
+            (username,),
         ).fetchone()
         if not user or not verify_password(payload.password, user["password_hash"]):
+            record_login_failure(conn, username, ip_addr, now_ts)
             raise HTTPException(status_code=401, detail="Invalid username or password.")
-        token, expires_at = create_session(conn, user["id"])
+        clear_login_failures(conn, username, ip_addr)
+        token, expires_at, csrf_token = create_session(conn, user["id"])
 
-    response.set_cookie(
-        key="session_token",
-        value=token,
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=SESSION_HOURS * 60 * 60,
-        path="/",
-    )
+    set_session_cookie(response, token)
+    set_csrf_cookie(response, csrf_token)
     return {"user": user_public(user), "expires_at": expires_at}
 
 
@@ -498,19 +800,29 @@ def register(payload: RegisterRequest) -> dict[str, Any]:
 @app.post("/api/auth/logout")
 def logout(
     response: Response,
-    session_token: str | None = Cookie(default=None),
+    session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     _: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, bool]:
     if session_token:
         with get_db() as conn:
             conn.execute("DELETE FROM user_sessions WHERE session_token=?", (session_token,))
             conn.commit()
-    response.delete_cookie("session_token", path="/")
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    response.delete_cookie(CSRF_COOKIE_NAME, path="/")
     return {"ok": True}
 
 
 @app.get("/api/auth/me")
-def me(current_user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+def me(
+    response: Response,
+    session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    if session_token:
+        with get_db() as conn:
+            csrf_token = ensure_session_csrf_token(conn, session_token)
+        if csrf_token:
+            set_csrf_cookie(response, csrf_token)
     return current_user
 
 

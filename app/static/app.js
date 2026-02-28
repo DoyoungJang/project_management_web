@@ -1,6 +1,6 @@
 ﻿const api = {
   async request(url, options = {}) {
-    const res = await fetch(url, options);
+    const res = await fetch(url, { credentials: "same-origin", ...options });
     if (res.status === 401) {
       window.location.href = "/static/login.html";
       throw new Error("Unauthorized");
@@ -15,19 +15,33 @@
   post(url, body) {
     return this.request(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: withCsrfHeader({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     });
   },
   del(url, body = null) {
-    const options = { method: "DELETE" };
+    const options = { method: "DELETE", headers: withCsrfHeader() };
     if (body !== null && body !== undefined) {
-      options.headers = { "Content-Type": "application/json" };
+      options.headers = withCsrfHeader({ "Content-Type": "application/json" });
       options.body = JSON.stringify(body);
     }
     return this.request(url, options);
   },
 };
+
+function getCookie(name) {
+  const encoded = `${encodeURIComponent(name)}=`;
+  const parts = document.cookie ? document.cookie.split("; ") : [];
+  for (const part of parts) {
+    if (part.startsWith(encoded)) return decodeURIComponent(part.slice(encoded.length));
+  }
+  return "";
+}
+
+function withCsrfHeader(headers = {}) {
+  const csrf = getCookie("csrf_token");
+  return csrf ? { ...headers, "X-CSRF-Token": csrf } : { ...headers };
+}
 
 const els = {
   userInfo: document.getElementById("user-info"),
