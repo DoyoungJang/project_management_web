@@ -465,6 +465,72 @@ button[data-edit-content-board]:hover {
   color: #243a50;
 }
 
+.admin-project-summary {
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+}
+
+.admin-project-summary::-webkit-details-marker {
+  display: none;
+}
+
+details.item[open] > .admin-project-summary {
+  margin-bottom: 6px;
+}
+
+#project-filter-input {
+  min-width: 220px;
+}
+
+.participant-table {
+  border: 1px solid #e0e7f1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+  overflow-x: auto;
+}
+
+.participant-grid {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.participant-grid th,
+.participant-grid td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #eef2f8;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.participant-grid thead th {
+  background: #f6f9ff;
+  font-weight: 700;
+  color: #334a63;
+}
+
+.participant-action-col {
+  width: 100px;
+  text-align: right !important;
+}
+
+.participant-delete-btn {
+  min-width: 64px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #fff5f5;
+  color: #a7332a;
+  border: 1px solid #f1c1bc;
+  font-weight: 700;
+}
+
+.participant-delete-btn:hover {
+  background: #ffeaea;
+}
+
 @media (max-width: 720px) {
   .hero h1 {
     font-size: 1.45rem;
@@ -488,5 +554,9 @@ button[data-edit-content-board]:hover {
 
   .kanban-board {
     grid-template-columns: 1fr;
+  }
+
+  .participant-grid {
+    min-width: 520px;
   }
 }

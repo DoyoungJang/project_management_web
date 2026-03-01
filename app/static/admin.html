@@ -38,11 +38,16 @@
       <section class="panel">
         <div class="panel__header">
           <h2>프로젝트 관리</h2>
-          <button id="reload-projects-btn" type="button">새로고침</button>
+          <div class="actions">
+            <input id="project-filter-input" type="search" placeholder="프로젝트/Owner 검색" />
+            <button id="expand-projects-btn" type="button">전체 펼치기</button>
+            <button id="collapse-projects-btn" type="button">전체 접기</button>
+            <button id="reload-projects-btn" type="button">새로고침</button>
+          </div>
         </div>
         <div id="projects-list" class="list"></div>
       </section>
     </main>
-    <script src="/static/admin.js?v=20260228_2"></script>
+    <script src="/static/admin.js?v=20260228_6"></script>
   </body>
 </html>
