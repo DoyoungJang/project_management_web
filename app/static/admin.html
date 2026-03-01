@@ -23,7 +23,7 @@
         <form id="create-user-form" class="form-grid">
           <input name="username" placeholder="아이디" required minlength="2" />
           <input name="display_name" placeholder="이름" required minlength="2" />
-          <input name="email" type="email" placeholder="email@company.local (선택)" />
+          <input name="email" type="email" placeholder="email@company.local" required />
           <input name="password" type="password" placeholder="초기 비밀번호" required minlength="6" />
           <label class="inline-check"><input name="is_admin" type="checkbox" /> 관리자</label>
           <button type="submit">사용자 추가</button>
@@ -31,23 +31,39 @@
       </section>
 
       <section class="panel">
-        <h2>사용자 목록</h2>
+        <div class="panel__header">
+          <h2>사용자 목록</h2>
+          <div class="actions">
+            <input id="user-filter-input" type="search" placeholder="아이디/이름/이메일 검색" />
+            <button id="expand-users-btn" type="button">전체 펼치기</button>
+            <button id="collapse-users-btn" type="button">전체 접기</button>
+          </div>
+        </div>
         <div id="users-list" class="list"></div>
+        <div id="users-overflow-controls" class="list-overflow-controls hidden">
+          <span id="users-overflow-info" class="item__meta"></span>
+          <button id="users-overflow-toggle" type="button"></button>
+        </div>
       </section>
 
       <section class="panel">
         <div class="panel__header">
           <h2>프로젝트 관리</h2>
           <div class="actions">
-            <input id="project-filter-input" type="search" placeholder="프로젝트/Owner 검색" />
+            <input id="project-filter-input" type="search" placeholder="프로젝트 검색" />
             <button id="expand-projects-btn" type="button">전체 펼치기</button>
             <button id="collapse-projects-btn" type="button">전체 접기</button>
             <button id="reload-projects-btn" type="button">새로고침</button>
           </div>
         </div>
         <div id="projects-list" class="list"></div>
+        <div id="projects-overflow-controls" class="list-overflow-controls hidden">
+          <span id="projects-overflow-info" class="item__meta"></span>
+          <button id="projects-overflow-toggle" type="button"></button>
+        </div>
       </section>
     </main>
-    <script src="/static/admin.js?v=20260228_6"></script>
+    <script src="/static/common.js?v=20260301_2"></script>
+    <script src="/static/admin.js?v=20260301_1"></script>
   </body>
 </html>

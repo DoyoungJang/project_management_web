@@ -18,52 +18,8 @@ if (!projectId) {
   throw new Error("Invalid project_id");
 }
 
-function getCookie(name) {
-  const encoded = `${encodeURIComponent(name)}=`;
-  const parts = document.cookie ? document.cookie.split("; ") : [];
-  for (const part of parts) {
-    if (part.startsWith(encoded)) return decodeURIComponent(part.slice(encoded.length));
-  }
-  return "";
-}
-
-function withCsrfHeader(headers = {}) {
-  const csrf = getCookie("csrf_token");
-  return csrf ? { ...headers, "X-CSRF-Token": csrf } : { ...headers };
-}
-
-const api = {
-  async request(url, options = {}) {
-    const res = await fetch(url, { credentials: "same-origin", ...options });
-    if (res.status === 401) {
-      window.location.href = "/static/login.html";
-      throw new Error("Unauthorized");
-    }
-    if (!res.ok) throw new Error(await res.text());
-    const text = await res.text();
-    return text ? JSON.parse(text) : {};
-  },
-  get(url) {
-    return this.request(url);
-  },
-  post(url, body) {
-    return this.request(url, {
-      method: "POST",
-      headers: withCsrfHeader({ "Content-Type": "application/json" }),
-      body: JSON.stringify(body),
-    });
-  },
-  patch(url, body) {
-    return this.request(url, {
-      method: "PATCH",
-      headers: withCsrfHeader({ "Content-Type": "application/json" }),
-      body: JSON.stringify(body),
-    });
-  },
-  del(url) {
-    return this.request(url, { method: "DELETE", headers: withCsrfHeader() });
-  },
-};
+const { createApiClient, escapeHtml, parseApiError } = window.PMCommon;
+const api = createApiClient();
 
 const els = {
   title: document.getElementById("project-title"),
@@ -90,15 +46,6 @@ let participants = [];
 let draggingChecklistId = null;
 let currentUser = null;
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
 function stageLabel(stage) {
   const found = STAGES.find((x) => x.key === stage);
   return found ? found.title : stage;
@@ -108,16 +55,6 @@ async function loadSession() {
   const me = await api.get("/api/auth/me");
   currentUser = me;
   if (me.is_admin) els.adminLink.classList.remove("hidden");
-}
-
-function parseApiError(error) {
-  try {
-    const parsed = JSON.parse(String(error.message || ""));
-    if (parsed && typeof parsed.detail === "string") return parsed.detail;
-  } catch (_) {
-    //
-  }
-  return String(error.message || "요청 처리 중 오류가 발생했습니다.");
 }
 
 async function userExists(username) {

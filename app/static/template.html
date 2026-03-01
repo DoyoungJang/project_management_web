@@ -30,8 +30,52 @@
         </form>
       </section>
 
+      <section class="panel backup-restore-panel">
+        <h2>템플릿 백업/복원</h2>
+        <div class="backup-restore-grid">
+          <article class="backup-restore-card">
+            <h3>백업 (Export)</h3>
+            <p class="item__meta">
+              전체 템플릿을 즉시 백업하거나, 별도 페이지에서 원하는 템플릿만 선택해서 백업할 수 있습니다.
+            </p>
+            <div class="actions">
+              <button id="export-all-btn" type="button">전체 템플릿 백업</button>
+              <button id="export-selected-btn" type="button">선택 템플릿 백업 페이지</button>
+            </div>
+          </article>
+
+          <article class="backup-restore-card">
+            <h3>복원 (Restore)</h3>
+            <p class="item__meta">백업 JSON 파일을 업로드해서 템플릿을 복원합니다.</p>
+            <div class="restore-picker">
+              <input id="restore-file-input" type="file" accept="application/json,.json" />
+              <span id="restore-file-name" class="item__meta">선택된 파일 없음</span>
+            </div>
+            <div class="restore-options">
+              <label for="restore-mode-select">동일 이름 템플릿 처리 방식</label>
+              <select id="restore-mode-select">
+                <option value="overwrite">덮어쓰기 (overwrite)</option>
+                <option value="skip">건너뛰기 (skip)</option>
+              </select>
+            </div>
+            <button id="restore-btn" type="button" disabled>복원 실행</button>
+            <p class="item__meta">
+              덮어쓰기를 선택하면 기존 템플릿 내용이 교체됩니다. 작업 전에 전체 백업을 권장합니다.
+            </p>
+          </article>
+        </div>
+      </section>
+
       <section class="panel">
         <h2>템플릿 목록</h2>
+        <div class="template-export-toolbar">
+          <label class="inline-check">
+            <input id="template-list-select-all" type="checkbox" />
+            전체 선택
+          </label>
+          <span id="template-list-selected-count" class="item__meta">0개 선택</span>
+          <button id="template-delete-selected-btn" type="button" class="danger" disabled>선택 템플릿 삭제</button>
+        </div>
         <div id="template-list" class="list"></div>
       </section>
 
@@ -49,6 +93,7 @@
       </section>
     </main>
 
-    <script src="/static/template.js?v=20260228_2"></script>
+    <script src="/static/common.js?v=20260301_2"></script>
+    <script src="/static/template.js?v=20260301_9"></script>
   </body>
 </html>

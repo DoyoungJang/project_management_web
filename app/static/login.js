@@ -1,37 +1,15 @@
-﻿const loginForm = document.getElementById("login-form");
+const { createApiClient, parseApiError } = window.PMCommon;
+const api = createApiClient({ redirectOnUnauthorized: false, includeUnauthorizedBody: true });
+
+const loginForm = document.getElementById("login-form");
 const registerForm = document.getElementById("register-form");
 
-async function request(url, options = {}) {
-  const res = await fetch(url, { credentials: "same-origin", ...options });
-  if (!res.ok) throw new Error(await res.text());
-  const text = await res.text();
-  return text ? JSON.parse(text) : {};
-}
-
-function parseApiError(error) {
-  try {
-    const parsed = JSON.parse(String(error.message || ""));
-    if (parsed && typeof parsed.detail === "string") return parsed.detail;
-  } catch (_) {
-    // no-op
-  }
-  return String(error.message || "요청 처리 중 오류가 발생했습니다.");
-}
-
 async function loginLocal(payload) {
-  return request("/api/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  return api.post("/api/auth/login", payload);
 }
 
 async function registerLocal(payload) {
-  return request("/api/auth/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  return api.post("/api/auth/register", payload);
 }
 
 function redirectAfterLogin(loginResult) {

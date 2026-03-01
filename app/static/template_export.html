@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>선택 템플릿 백업</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero__inner">
+        <div class="topbar">
+          <a class="btn-link" href="/static/template.html">템플릿 관리로 돌아가기</a>
+          <div class="actions">
+            <a id="admin-link" class="btn-link hidden" href="/static/admin.html">Admin</a>
+            <button id="logout-btn" type="button">로그아웃</button>
+          </div>
+        </div>
+        <h1>선택 템플릿 백업</h1>
+        <p>백업할 템플릿을 선택한 뒤 JSON 파일로 다운로드하세요.</p>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel">
+        <div class="panel__header">
+          <h2>백업 대상 선택</h2>
+          <div class="actions">
+            <button id="reload-btn" type="button">새로고침</button>
+          </div>
+        </div>
+
+        <div class="template-export-toolbar">
+          <label class="inline-check">
+            <input id="select-all" type="checkbox" />
+            전체 선택
+          </label>
+          <span id="selected-count" class="item__meta">0개 선택</span>
+          <button id="export-selected-btn" type="button" disabled>선택한 템플릿 백업</button>
+        </div>
+
+        <div id="template-export-list" class="list" style="margin-top: 10px"></div>
+      </section>
+    </main>
+
+    <script src="/static/common.js?v=20260301_2"></script>
+    <script src="/static/template_export.js?v=20260301_2"></script>
+  </body>
+</html>

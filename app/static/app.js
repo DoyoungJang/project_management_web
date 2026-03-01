@@ -1,47 +1,5 @@
-﻿const api = {
-  async request(url, options = {}) {
-    const res = await fetch(url, { credentials: "same-origin", ...options });
-    if (res.status === 401) {
-      window.location.href = "/static/login.html";
-      throw new Error("Unauthorized");
-    }
-    if (!res.ok) throw new Error(await res.text());
-    const text = await res.text();
-    return text ? JSON.parse(text) : {};
-  },
-  get(url) {
-    return this.request(url);
-  },
-  post(url, body) {
-    return this.request(url, {
-      method: "POST",
-      headers: withCsrfHeader({ "Content-Type": "application/json" }),
-      body: JSON.stringify(body),
-    });
-  },
-  del(url, body = null) {
-    const options = { method: "DELETE", headers: withCsrfHeader() };
-    if (body !== null && body !== undefined) {
-      options.headers = withCsrfHeader({ "Content-Type": "application/json" });
-      options.body = JSON.stringify(body);
-    }
-    return this.request(url, options);
-  },
-};
-
-function getCookie(name) {
-  const encoded = `${encodeURIComponent(name)}=`;
-  const parts = document.cookie ? document.cookie.split("; ") : [];
-  for (const part of parts) {
-    if (part.startsWith(encoded)) return decodeURIComponent(part.slice(encoded.length));
-  }
-  return "";
-}
-
-function withCsrfHeader(headers = {}) {
-  const csrf = getCookie("csrf_token");
-  return csrf ? { ...headers, "X-CSRF-Token": csrf } : { ...headers };
-}
+const { createApiClient, escapeHtml, parseApiError } = window.PMCommon;
+const api = createApiClient();
 
 const els = {
   userInfo: document.getElementById("user-info"),
@@ -66,15 +24,6 @@ let projects = [];
 let currentUser = null;
 let upcomingItems = [];
 let upcomingRelationFilter = "all";
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
 
 function statusLabel(raw) {
   const map = {
@@ -107,16 +56,6 @@ function relationBadgeClass(raw) {
   if (raw === "owner") return "badge--owner";
   if (raw === "participant") return "badge--participant";
   return "";
-}
-
-function parseApiError(error) {
-  try {
-    const parsed = JSON.parse(String(error.message || ""));
-    if (parsed && typeof parsed.detail === "string") return parsed.detail;
-  } catch (_) {
-    // no-op
-  }
-  return String(error.message || "요청 처리 중 오류가 발생했습니다.");
 }
 
 function renderUpcomingItems(items) {

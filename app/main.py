@@ -7,6 +7,7 @@ import secrets
 import sqlite3
 import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -645,7 +646,7 @@ class AdminUserCreate(BaseModel):
     username: str = Field(min_length=2, max_length=40, pattern=r"^[a-zA-Z0-9._-]+$")
     display_name: str = Field(min_length=2, max_length=60)
     password: str = Field(min_length=6, max_length=128)
-    email: str | None = Field(default=None, max_length=120)
+    email: str = Field(min_length=3, max_length=120, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     is_admin: bool = False
 
 
@@ -735,6 +736,31 @@ class TemplateItemDraft(BaseModel):
 class TemplateItemsReplaceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     items: list[TemplateItemDraft]
+
+
+class TemplateRestoreItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    stage: str = Field(pattern="^(data_acquisition|labeling|development)$")
+    content: str = Field(min_length=1, max_length=200)
+    position: int = Field(ge=0)
+
+
+class TemplateRestoreEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=2, max_length=80)
+    description: str = Field(default="", max_length=300)
+    items: list[TemplateRestoreItem] = Field(default_factory=list, max_length=2000)
+
+
+class TemplatesRestoreRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: str = Field(default="overwrite", pattern="^(overwrite|skip)$")
+    templates: list[TemplateRestoreEntry] = Field(min_length=1, max_length=300)
+
+
+class TemplateExportSelectedRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    template_ids: list[int] = Field(min_length=1, max_length=300)
 
 
 @app.on_event("startup")
@@ -868,7 +894,7 @@ def admin_create_user(
                 payload.display_name.strip(),
                 hash_password(payload.password),
                 1 if payload.is_admin else 0,
-                (payload.email or "").strip() or None,
+                payload.email.strip(),
             ),
         )
         conn.commit()
@@ -1591,6 +1617,224 @@ def list_templates(current_user: dict[str, Any] = Depends(get_current_user)) -> 
         item["is_owner"] = item["created_by"] == current_user["id"]
         result.append(item)
     return result
+
+
+def build_templates_export_payload(
+    conn: sqlite3.Connection,
+    selected_template_ids: list[int] | None = None,
+) -> dict[str, Any]:
+    filters = ""
+    params: list[Any] = []
+    if selected_template_ids is not None:
+        normalized = sorted({int(x) for x in selected_template_ids})
+        if not normalized:
+            return {
+                "version": 1,
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+                "templates": [],
+            }
+        placeholders = ",".join(["?"] * len(normalized))
+        filters = f" WHERE t.id IN ({placeholders})"
+        params.extend(normalized)
+
+    template_rows = conn.execute(
+        f"""
+        SELECT
+            t.id,
+            t.name,
+            t.description,
+            t.created_at,
+            u.username AS creator_username,
+            u.display_name AS creator_name
+        FROM checklist_templates t
+        JOIN users u ON u.id = t.created_by
+        {filters}
+        ORDER BY t.id ASC
+        """,
+        tuple(params),
+    ).fetchall()
+
+    if not template_rows:
+        return {
+            "version": 1,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "templates": [],
+        }
+
+    template_ids = [int(row["id"]) for row in template_rows]
+    item_placeholders = ",".join(["?"] * len(template_ids))
+    item_rows = conn.execute(
+        f"""
+        SELECT template_id, stage, content, position
+        FROM checklist_template_items
+        WHERE template_id IN ({item_placeholders})
+        ORDER BY
+            template_id ASC,
+            CASE stage
+                WHEN 'data_acquisition' THEN 1
+                WHEN 'labeling' THEN 2
+                WHEN 'development' THEN 3
+                ELSE 4
+            END,
+            position ASC,
+            id ASC
+        """,
+        tuple(template_ids),
+    ).fetchall()
+
+    items_by_template: dict[int, list[dict[str, Any]]] = {}
+    for row in item_rows:
+        key = int(row["template_id"])
+        items_by_template.setdefault(key, []).append(
+            {
+                "stage": row["stage"],
+                "content": row["content"],
+                "position": int(row["position"]),
+            }
+        )
+
+    templates: list[dict[str, Any]] = []
+    for row in template_rows:
+        template_id = int(row["id"])
+        templates.append(
+            {
+                "id": template_id,
+                "name": row["name"],
+                "description": row["description"] or "",
+                "created_at": row["created_at"],
+                "creator_username": row["creator_username"],
+                "creator_name": row["creator_name"],
+                "items": items_by_template.get(template_id, []),
+            }
+        )
+
+    return {
+        "version": 1,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "templates": templates,
+    }
+
+
+@app.get("/api/template-export")
+def export_templates_all(_: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    with get_db() as conn:
+        return build_templates_export_payload(conn)
+
+
+@app.post("/api/template-export/selected")
+def export_templates_selected(
+    payload: TemplateExportSelectedRequest,
+    _: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    with get_db() as conn:
+        return build_templates_export_payload(conn, payload.template_ids)
+
+
+@app.get("/api/templates/export")
+def export_templates_legacy(current_user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    # Backward compatibility endpoint.
+    return export_templates_all(current_user)
+
+
+@app.post("/api/templates/restore")
+def restore_templates(
+    payload: TemplatesRestoreRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    stage_order = {"data_acquisition": 1, "labeling": 2, "development": 3}
+    incoming_names = [tpl.name.strip() for tpl in payload.templates]
+
+    if len(set(incoming_names)) != len(incoming_names):
+        raise HTTPException(status_code=400, detail="Duplicate template names found in restore file.")
+
+    total_items = sum(len(tpl.items) for tpl in payload.templates)
+    if total_items > 10000:
+        raise HTTPException(status_code=400, detail="Restore payload is too large.")
+
+    created = 0
+    updated = 0
+    skipped = 0
+    failed: list[dict[str, str]] = []
+
+    with get_db() as conn:
+        for tpl in payload.templates:
+            name = tpl.name.strip()
+            description = (tpl.description or "").strip()
+
+            normalized_items: list[tuple[str, str, int]] = []
+            grouped: dict[str, list[TemplateRestoreItem]] = {
+                "data_acquisition": [],
+                "labeling": [],
+                "development": [],
+            }
+            for item in tpl.items:
+                grouped[item.stage].append(item)
+
+            for stage in ("data_acquisition", "labeling", "development"):
+                items = sorted(grouped[stage], key=lambda x: x.position)
+                for idx, item in enumerate(items):
+                    normalized_items.append((stage, item.content.strip(), idx))
+
+            existing = conn.execute(
+                "SELECT id, created_by FROM checklist_templates WHERE name=?",
+                (name,),
+            ).fetchone()
+
+            if existing:
+                if payload.mode == "skip":
+                    skipped += 1
+                    continue
+
+                can_edit = existing["created_by"] == current_user["id"] or bool(current_user["is_admin"])
+                if not can_edit:
+                    failed.append({"name": name, "reason": "No permission to overwrite this template."})
+                    continue
+
+                template_id = int(existing["id"])
+                conn.execute(
+                    "UPDATE checklist_templates SET description=? WHERE id=?",
+                    (description, template_id),
+                )
+                conn.execute("DELETE FROM checklist_template_items WHERE template_id=?", (template_id,))
+                for stage, content, pos in normalized_items:
+                    conn.execute(
+                        """
+                        INSERT INTO checklist_template_items (template_id, stage, content, position)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (template_id, stage, content, pos),
+                    )
+                updated += 1
+                continue
+
+            cur = conn.execute(
+                """
+                INSERT INTO checklist_templates (name, description, created_by)
+                VALUES (?, ?, ?)
+                """,
+                (name, description, current_user["id"]),
+            )
+            template_id = int(cur.lastrowid)
+            ordered_items = sorted(normalized_items, key=lambda x: (stage_order[x[0]], x[2]))
+            for stage, content, pos in ordered_items:
+                conn.execute(
+                    """
+                    INSERT INTO checklist_template_items (template_id, stage, content, position)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (template_id, stage, content, pos),
+                )
+            created += 1
+
+        conn.commit()
+
+    return {
+        "ok": True,
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "failed": failed,
+    }
 
 
 @app.post("/api/templates", status_code=201)

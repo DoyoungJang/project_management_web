@@ -145,6 +145,11 @@ button:active {
   gap: 6px;
 }
 
+.item.is-selected {
+  border-color: #0f6d66;
+  box-shadow: 0 0 0 2px rgba(15, 109, 102, 0.14);
+}
+
 .item__head {
   display: flex;
   justify-content: space-between;
@@ -225,6 +230,64 @@ button:active {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
+}
+
+.backup-restore-panel h2 {
+  margin-bottom: 10px;
+}
+
+.backup-restore-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.backup-restore-card {
+  border: 1px solid #dbe5f2;
+  border-radius: 12px;
+  padding: 12px;
+  background: #f8fbff;
+  display: grid;
+  gap: 10px;
+}
+
+.backup-restore-card h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.backup-restore-card .actions {
+  flex-wrap: wrap;
+}
+
+.restore-picker {
+  display: grid;
+  gap: 6px;
+}
+
+.restore-picker input[type="file"] {
+  background: #fff;
+}
+
+.restore-options {
+  display: grid;
+  gap: 6px;
+}
+
+.restore-options label {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.template-export-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.template-export-item {
+  cursor: pointer;
 }
 
 .topbar {
@@ -479,6 +542,20 @@ details.item[open] > .admin-project-summary {
   margin-bottom: 6px;
 }
 
+.admin-user-summary {
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+}
+
+.admin-user-summary::-webkit-details-marker {
+  display: none;
+}
+
+details.item[open] > .admin-user-summary {
+  margin-bottom: 6px;
+}
+
 #project-filter-input {
   min-width: 220px;
 }
@@ -531,6 +608,14 @@ details.item[open] > .admin-project-summary {
   background: #ffeaea;
 }
 
+.list-overflow-controls {
+  margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
 @media (max-width: 720px) {
   .hero h1 {
     font-size: 1.45rem;
@@ -558,5 +643,10 @@ details.item[open] > .admin-project-summary {
 
   .participant-grid {
     min-width: 520px;
+  }
+
+  .list-overflow-controls {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
