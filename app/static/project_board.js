@@ -32,11 +32,14 @@ const els = {
 };
 
 let checklistItems = [];
+let projectStages = [];
 let draggingChecklistId = null;
 
 function stageLabel(stage) {
-  const found = STAGES.find((x) => x.key === stage);
-  return found ? found.title : stage;
+  const foundDynamic = projectStages.find((x) => x.stage_key === stage);
+  if (foundDynamic) return foundDynamic.stage_name;
+  const foundFallback = STAGES.find((x) => x.key === stage);
+  return foundFallback ? foundFallback.title : stage;
 }
 
 async function loadSession() {
@@ -50,6 +53,10 @@ async function loadProject() {
   if (els.settingsLink) {
     els.settingsLink.href = `/static/project_settings.html?project_id=${projectId}`;
   }
+}
+
+async function loadStages() {
+  projectStages = await api.get(`/api/projects/${projectId}/stages`);
 }
 
 function normalizeWorkflowStatus(item) {
@@ -155,6 +162,7 @@ Promise.resolve()
   .then(async () => {
     await loadSession();
     await loadProject();
+    await loadStages();
     await loadChecklist();
   })
   .catch((err) => {

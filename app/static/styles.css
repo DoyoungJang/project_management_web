@@ -411,6 +411,73 @@ button:active {
   gap: 12px;
 }
 
+.work-panel__header {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.work-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) 1fr;
+  gap: 14px;
+}
+
+.work-subpanel {
+  border: 1px solid #dfe7f2;
+  border-radius: 12px;
+  background: #f9fbff;
+  padding: 12px;
+}
+
+.work-subpanel h3 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.stage-create-row {
+  margin-bottom: 10px;
+}
+
+.stage-list {
+  max-height: 420px;
+  overflow: auto;
+}
+
+.stage-manager-item {
+  background: #fff;
+}
+
+.stage-manager-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stage-manager-index {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #e6f4f2;
+  color: #0b6059;
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.stage-key-badge {
+  background: #eef3ff;
+  color: #27426a;
+}
+
+.stage-manager-actions {
+  justify-content: flex-end;
+}
+
+.stage-container--work {
+  gap: 10px;
+}
+
 .kanban-board {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -476,6 +543,18 @@ button:active {
   margin: 0 0 10px;
 }
 
+.work-stage__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.work-stage__head h3 {
+  margin: 0;
+}
+
 .check-list {
   display: grid;
   gap: 8px;
@@ -506,6 +585,22 @@ button:active {
 
 .check-form.with-date {
   grid-template-columns: 1fr auto auto auto;
+}
+
+.work-check-form {
+  margin-top: 12px;
+  background: #fff;
+  border: 1px solid #e2e9f3;
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.text-edit,
+.date-edit {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
 }
 
 .check-del {
@@ -639,6 +734,14 @@ details.item[open] > .admin-user-summary {
 
   .kanban-board {
     grid-template-columns: 1fr;
+  }
+
+  .work-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .work-subpanel {
+    padding: 10px;
   }
 
   .participant-grid {

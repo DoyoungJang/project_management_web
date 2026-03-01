@@ -162,7 +162,7 @@ function renderProjects() {
         <div>${escapeHtml(p.description || "-")}</div>
         <div class="item__meta">담당: ${escapeHtml(p.owner)} | 마감: ${escapeHtml(p.due_date || "-")}</div>
         <div class="actions">
-          <button data-open-project="${p.id}">보드</button>
+          <button data-open-project="${p.id}">작업 보드</button>
           <button class="btn-settings" data-open-project-settings="${p.id}">프로젝트 설정</button>
           ${canDelete ? `<button class="danger" data-del-project="${p.id}">삭제</button>` : ""}
         </div>

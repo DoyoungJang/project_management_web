@@ -25,15 +25,14 @@ const els = {
   title: document.getElementById("project-title"),
   form: document.getElementById("project-update-form"),
   stages: document.getElementById("stage-container"),
+  stageCreateForm: document.getElementById("stage-create-form"),
+  stageNameInput: document.getElementById("stage-name-input"),
+  stageList: document.getElementById("stage-list"),
   board: document.getElementById("kanban-board"),
   adminLink: document.getElementById("admin-link"),
   logoutBtn: document.getElementById("logout-btn"),
   templateSelect: document.getElementById("template-select"),
   applyTemplateBtn: document.getElementById("apply-template-btn"),
-  ruleForm: document.getElementById("rule-form"),
-  daysBeforeInput: document.getElementById("days-before-input"),
-  ruleList: document.getElementById("rule-list"),
-  notificationPreviewList: document.getElementById("notification-preview-list"),
   participantForm: document.getElementById("participant-form"),
   participantUsername: document.getElementById("participant-username"),
   participantList: document.getElementById("participant-list"),
@@ -41,14 +40,16 @@ const els = {
 
 let checklistItems = [];
 let templates = [];
-let notificationRules = [];
 let participants = [];
+let projectStages = [];
 let draggingChecklistId = null;
 let currentUser = null;
 
 function stageLabel(stage) {
-  const found = STAGES.find((x) => x.key === stage);
-  return found ? found.title : stage;
+  const foundDynamic = projectStages.find((x) => x.stage_key === stage);
+  if (foundDynamic) return foundDynamic.stage_name;
+  const foundFallback = STAGES.find((x) => x.key === stage);
+  return foundFallback ? foundFallback.title : stage;
 }
 
 async function loadSession() {
@@ -86,46 +87,6 @@ function renderTemplateSelect() {
   els.applyTemplateBtn.disabled = false;
 }
 
-function renderNotificationRules() {
-  if (notificationRules.length === 0) {
-    els.ruleList.innerHTML = "<div class='item'>등록된 알림 규칙이 없습니다.</div>";
-    return;
-  }
-  els.ruleList.innerHTML = notificationRules
-    .map(
-      (rule) => `
-      <div class="item">
-        <div class="item__head">
-          <strong>D-${rule.days_before}</strong>
-          <button class="danger" data-del-rule="${rule.id}">삭제</button>
-        </div>
-        <div class="item__meta">목표일 ${rule.days_before}일 전에 알림</div>
-      </div>
-    `
-    )
-    .join("");
-}
-
-function renderNotificationPreview(rows) {
-  if (!rows.length) {
-    els.notificationPreviewList.innerHTML = "<div class='item'>앞으로 30일 기준 알림 예정 항목이 없습니다.</div>";
-    return;
-  }
-  els.notificationPreviewList.innerHTML = rows
-    .map(
-      (x) => `
-      <div class="item">
-        <div class="item__head">
-          <strong>${escapeHtml(x.content)}</strong>
-          <span class="badge">${escapeHtml(x.notify_date)}</span>
-        </div>
-        <div class="item__meta">단계: ${escapeHtml(x.stage)} | D-${x.days_before} 알림 | 목표일: ${escapeHtml(x.target_date)}</div>
-      </div>
-    `
-    )
-    .join("");
-}
-
 function renderParticipants() {
   if (!els.participantList) return;
   const list = [...participants].sort((a, b) => {
@@ -159,6 +120,34 @@ function renderParticipants() {
           }
         </div>
         <div class="item__meta">${escapeHtml(x.display_name || "")}</div>
+      </div>
+    `
+    )
+    .join("");
+}
+
+function renderStageManager() {
+  if (!els.stageList) return;
+  if (!projectStages.length) {
+    els.stageList.innerHTML = "<div class='item stage-manager-item'>등록된 대항목이 없습니다.</div>";
+    return;
+  }
+
+  els.stageList.innerHTML = projectStages
+    .map(
+      (stage, idx) => `
+      <div class="item stage-manager-item">
+        <div class="item__head">
+          <div class="stage-manager-title">
+            <span class="stage-manager-index">${idx + 1}</span>
+            <strong>${escapeHtml(stage.stage_name)}</strong>
+          </div>
+          <span class="badge stage-key-badge">${escapeHtml(stage.stage_key)}</span>
+        </div>
+        <div class="actions stage-manager-actions">
+          <button type="button" data-edit-stage="${stage.id}">이름 변경</button>
+          <button type="button" class="danger" data-delete-stage="${stage.id}">삭제</button>
+        </div>
       </div>
     `
     )
@@ -203,11 +192,15 @@ function renderBoard() {
 
 function renderStages() {
   if (!els.stages) return;
-  els.stages.innerHTML = STAGES.map((stage) => renderStage(stage)).join("");
+  if (!projectStages.length) {
+    els.stages.innerHTML = "<div class='item'>대항목을 먼저 추가해 주세요.</div>";
+    return;
+  }
+  els.stages.innerHTML = projectStages.map((stage) => renderStage(stage)).join("");
 }
 
 function renderStage(stage) {
-  const items = checklistItems.filter((x) => x.stage === stage.key);
+  const items = checklistItems.filter((x) => x.stage === stage.stage_key);
   const listHtml =
     items.length === 0
       ? "<div class='item__meta'>작업 항목이 없습니다.</div>"
@@ -234,10 +227,13 @@ function renderStage(stage) {
           .join("");
 
   return `
-    <article class="stage">
-      <h3>${stage.title}</h3>
+    <article class="stage work-stage">
+      <div class="work-stage__head">
+        <h3>${stage.stage_name}</h3>
+        <span class="badge">${items.length}개</span>
+      </div>
       <div class="check-list">${listHtml}</div>
-      <form class="check-form with-date" data-stage-form="${stage.key}">
+      <form class="check-form with-date work-check-form" data-stage-form="${stage.stage_key}">
         <input name="content" placeholder="작업 항목 입력" required minlength="1" maxlength="200" />
         <input name="target_date" type="date" />
         <select name="workflow_status">
@@ -348,7 +344,6 @@ function bindBoardDragEvents() {
         position: maxPos + 1,
       });
       await loadChecklist();
-      await loadRulesAndPreview();
     });
   });
 }
@@ -356,6 +351,11 @@ function bindBoardDragEvents() {
 async function loadProject() {
   const project = await api.get(`/api/projects/${projectId}`);
   setProjectForm(project);
+}
+
+async function loadStages() {
+  projectStages = await api.get(`/api/projects/${projectId}/stages`);
+  renderStageManager();
 }
 
 async function loadChecklist() {
@@ -369,13 +369,6 @@ async function loadChecklist() {
 async function loadTemplates() {
   templates = await api.get("/api/templates");
   renderTemplateSelect();
-}
-
-async function loadRulesAndPreview() {
-  notificationRules = await api.get(`/api/projects/${projectId}/notification-rules`);
-  renderNotificationRules();
-  const preview = await api.get(`/api/projects/${projectId}/notifications/preview?days=30`);
-  renderNotificationPreview(preview);
 }
 
 async function loadParticipants() {
@@ -446,31 +439,70 @@ els.participantList?.addEventListener("click", async (e) => {
   }
 });
 
+els.stageCreateForm?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = String(els.stageNameInput?.value || "").trim();
+  if (!name) {
+    alert("대항목 이름을 입력해 주세요.");
+    els.stageNameInput?.focus();
+    return;
+  }
+  try {
+    await api.post(`/api/projects/${projectId}/stages`, { name });
+    els.stageCreateForm.reset();
+    await loadStages();
+    await loadChecklist();
+  } catch (err) {
+    alert(parseApiError(err));
+  }
+});
+
+els.stageList?.addEventListener("click", async (e) => {
+  const editBtn = e.target.closest("[data-edit-stage]");
+  if (editBtn) {
+    const stageId = Number(editBtn.getAttribute("data-edit-stage"));
+    const target = projectStages.find((x) => Number(x.id) === stageId);
+    if (!target) return;
+    const nextName = prompt("변경할 대항목 이름을 입력하세요.", target.stage_name || "");
+    if (nextName === null) return;
+    const trimmed = String(nextName || "").trim();
+    if (!trimmed) {
+      alert("대항목 이름을 입력해 주세요.");
+      return;
+    }
+    try {
+      await api.patch(`/api/projects/${projectId}/stages/${stageId}`, { name: trimmed });
+      await loadStages();
+      await loadChecklist();
+    } catch (err) {
+      alert(parseApiError(err));
+    }
+    return;
+  }
+
+  const deleteBtn = e.target.closest("[data-delete-stage]");
+  if (!deleteBtn) return;
+  const stageId = Number(deleteBtn.getAttribute("data-delete-stage"));
+  const target = projectStages.find((x) => Number(x.id) === stageId);
+  if (!target) return;
+  if (!confirm(`대항목 '${target.stage_name}'를 삭제할까요?`)) return;
+  try {
+    await api.del(`/api/projects/${projectId}/stages/${stageId}`);
+    await loadStages();
+    await loadChecklist();
+  } catch (err) {
+    alert(parseApiError(err));
+  }
+});
+
 els.applyTemplateBtn.addEventListener("click", async () => {
   const templateId = Number(els.templateSelect.value);
   if (!templateId) return;
   if (!confirm("현재 작업 항목을 지우고 선택한 템플릿으로 적용할까요?")) return;
   await api.post(`/api/projects/${projectId}/apply-template/${templateId}`, {});
+  await loadStages();
   await loadChecklist();
-  await loadRulesAndPreview();
   alert("템플릿이 적용되었습니다.");
-});
-
-els.ruleForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const daysBefore = Number(els.daysBeforeInput.value);
-  await api.post(`/api/projects/${projectId}/notification-rules`, { days_before: daysBefore });
-  els.daysBeforeInput.value = "1";
-  await loadRulesAndPreview();
-});
-
-els.ruleList.addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-del-rule]");
-  if (!btn) return;
-  const id = btn.getAttribute("data-del-rule");
-  if (!confirm("알림 규칙을 삭제할까요?")) return;
-  await api.del(`/api/notification-rules/${id}`);
-  await loadRulesAndPreview();
 });
 
 els.stages?.addEventListener("submit", async (e) => {
@@ -488,7 +520,6 @@ els.stages?.addEventListener("submit", async (e) => {
   await api.post(`/api/projects/${projectId}/checklists`, body);
   form.reset();
   await loadChecklist();
-  await loadRulesAndPreview();
 });
 
 els.stages?.addEventListener("change", async (e) => {
@@ -497,7 +528,6 @@ els.stages?.addEventListener("change", async (e) => {
   const itemId = checkbox.getAttribute("data-toggle-item");
   await api.patch(`/api/checklists/${itemId}`, { is_done: checkbox.checked });
   await loadChecklist();
-  await loadRulesAndPreview();
 });
 
 els.stages?.addEventListener("click", async (e) => {
@@ -532,7 +562,6 @@ els.stages?.addEventListener("click", async (e) => {
     }
     await api.patch(`/api/checklists/${id}`, { content });
     await loadChecklist();
-    await loadRulesAndPreview();
     return;
   }
 
@@ -542,7 +571,6 @@ els.stages?.addEventListener("click", async (e) => {
     const input = els.stages.querySelector(`[data-date-list="${id}"]`);
     await api.patch(`/api/checklists/${id}`, { target_date: input.value || null });
     await loadChecklist();
-    await loadRulesAndPreview();
     return;
   }
 
@@ -552,7 +580,6 @@ els.stages?.addEventListener("click", async (e) => {
   if (!confirm("작업 항목을 삭제할까요?")) return;
   await api.del(`/api/checklists/${itemId}`);
   await loadChecklist();
-  await loadRulesAndPreview();
 });
 
 els.board?.addEventListener("click", async (e) => {
@@ -587,7 +614,6 @@ els.board?.addEventListener("click", async (e) => {
     }
     await api.patch(`/api/checklists/${id}`, { content });
     await loadChecklist();
-    await loadRulesAndPreview();
     return;
   }
 
@@ -597,7 +623,6 @@ els.board?.addEventListener("click", async (e) => {
   const input = els.board.querySelector(`[data-date-board="${id}"]`);
   await api.patch(`/api/checklists/${id}`, { target_date: input.value || null });
   await loadChecklist();
-  await loadRulesAndPreview();
 });
 
 Promise.resolve()
@@ -605,10 +630,10 @@ Promise.resolve()
     await loadSession();
     // Always load core project data first so header/form are populated.
     await loadProject();
+    await loadStages();
     await loadChecklist();
     const optionalLoads = await Promise.allSettled([
       loadTemplates(),
-      loadRulesAndPreview(),
       loadParticipants(),
     ]);
     optionalLoads.forEach((x) => {

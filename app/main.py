@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -27,6 +28,11 @@ CSRF_COOKIE_NAME = "csrf_token"
 SAFE_SAMESITE_VALUES = {"lax", "strict", "none"}
 DEFAULT_CORS_ORIGINS = ["http://127.0.0.1:8000", "http://127.0.0.1:8080", "http://localhost:8000", "http://localhost:8080"]
 CSRF_EXEMPT_PATHS = {"/api/auth/login", "/api/auth/register", "/api/health"}
+DEFAULT_PROJECT_STAGES = [
+    {"key": "data_acquisition", "name": "1. 데이터 획득"},
+    {"key": "labeling", "name": "2. 라벨링"},
+    {"key": "development", "name": "3. 개발"},
+]
 
 
 def load_env_file(env_path: Path) -> None:
@@ -178,6 +184,64 @@ def verify_password(password: str, password_hash: str) -> bool:
     return hmac.compare_digest(candidate, stored_hash)
 
 
+def normalize_stage_key(name: str) -> str:
+    key = re.sub(r"[^a-z0-9]+", "_", name.strip().lower())
+    key = key.strip("_")
+    return key or "stage"
+
+
+def default_stage_name_from_key(stage_key: str) -> str:
+    for stage in DEFAULT_PROJECT_STAGES:
+        if stage["key"] == stage_key:
+            return stage["name"]
+    return stage_key
+
+
+def generate_unique_stage_key(conn: sqlite3.Connection, project_id: int, stage_name: str) -> str:
+    base = normalize_stage_key(stage_name)
+    candidate = base
+    suffix = 2
+    while conn.execute(
+        "SELECT 1 FROM project_stages WHERE project_id=? AND stage_key=?",
+        (project_id, candidate),
+    ).fetchone():
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def ensure_default_project_stages(conn: sqlite3.Connection, project_id: int) -> None:
+    count_row = conn.execute(
+        "SELECT COUNT(*) AS c FROM project_stages WHERE project_id=?",
+        (project_id,),
+    ).fetchone()
+    if int(count_row["c"]) > 0:
+        return
+    for idx, stage in enumerate(DEFAULT_PROJECT_STAGES):
+        conn.execute(
+            """
+            INSERT INTO project_stages (project_id, stage_key, stage_name, position)
+            VALUES (?, ?, ?, ?)
+            """,
+            (project_id, stage["key"], stage["name"], idx),
+        )
+
+
+def ensure_project_stage_exists(conn: sqlite3.Connection, project_id: int, stage_key: str) -> sqlite3.Row:
+    ensure_default_project_stages(conn, project_id)
+    row = conn.execute(
+        """
+        SELECT *
+        FROM project_stages
+        WHERE project_id=? AND stage_key=?
+        """,
+        (project_id, stage_key),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=400, detail=f"Invalid stage key: {stage_key}")
+    return row
+
+
 def init_db() -> None:
     with get_db() as conn:
         conn.executescript(
@@ -235,7 +299,7 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS project_checklist_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL,
-                stage TEXT NOT NULL CHECK (stage IN ('data_acquisition', 'labeling', 'development')),
+                stage TEXT NOT NULL,
                 content TEXT NOT NULL,
                 is_done INTEGER NOT NULL DEFAULT 0,
                 workflow_status TEXT NOT NULL DEFAULT 'upcoming'
@@ -266,6 +330,17 @@ def init_db() -> None:
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS project_stages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                stage_key TEXT NOT NULL,
+                stage_name TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (project_id, stage_key),
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS checklist_templates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
@@ -293,6 +368,53 @@ def init_db() -> None:
         ensure_column(conn, "user_sessions", "csrf_token", "TEXT")
         ensure_column(conn, "project_checklist_items", "target_date", "TEXT")
         ensure_column(conn, "project_checklist_items", "workflow_status", "TEXT NOT NULL DEFAULT 'upcoming'")
+
+        checklist_table_sql_row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='project_checklist_items'"
+        ).fetchone()
+        checklist_table_sql = str(checklist_table_sql_row["sql"] or "") if checklist_table_sql_row else ""
+        if "CHECK (stage IN ('data_acquisition', 'labeling', 'development'))" in checklist_table_sql:
+            conn.executescript(
+                """
+                ALTER TABLE project_checklist_items RENAME TO project_checklist_items_legacy;
+
+                CREATE TABLE project_checklist_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    stage TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    is_done INTEGER NOT NULL DEFAULT 0,
+                    workflow_status TEXT NOT NULL DEFAULT 'upcoming'
+                        CHECK (workflow_status IN ('upcoming', 'inprogress', 'done')),
+                    position INTEGER NOT NULL DEFAULT 0,
+                    target_date TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+                );
+
+                INSERT INTO project_checklist_items
+                    (id, project_id, stage, content, is_done, workflow_status, position, target_date, created_at)
+                SELECT
+                    id,
+                    project_id,
+                    stage,
+                    content,
+                    is_done,
+                    CASE
+                        WHEN workflow_status IS NULL OR workflow_status='' THEN
+                            CASE WHEN is_done=1 THEN 'done' ELSE 'upcoming' END
+                        ELSE workflow_status
+                    END,
+                    position,
+                    target_date,
+                    created_at
+                FROM project_checklist_items_legacy;
+
+                DROP TABLE project_checklist_items_legacy;
+                """
+            )
+            conn.commit()
+
         stale_sessions = conn.execute(
             "SELECT id FROM user_sessions WHERE csrf_token IS NULL OR csrf_token=''"
         ).fetchall()
@@ -344,6 +466,9 @@ def init_db() -> None:
             JOIN users u ON u.username = p.owner
             """
         )
+        project_rows = conn.execute("SELECT id FROM projects").fetchall()
+        for project_row in project_rows:
+            ensure_default_project_stages(conn, int(project_row["id"]))
         conn.commit()
 
         admin_exists = conn.execute("SELECT id FROM users WHERE is_admin=1 LIMIT 1").fetchone()
@@ -683,7 +808,7 @@ class ProjectDeleteRequest(BaseModel):
 
 class ChecklistItemCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    stage: str = Field(pattern="^(data_acquisition|labeling|development)$")
+    stage: str = Field(min_length=1, max_length=60, pattern=r"^[a-z0-9_]+$")
     content: str = Field(min_length=1, max_length=200)
     target_date: str | None = None
     workflow_status: str = Field(default="upcoming", pattern="^(upcoming|inprogress|done)$")
@@ -691,6 +816,7 @@ class ChecklistItemCreate(BaseModel):
 
 class ChecklistItemUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    stage: str | None = Field(default=None, min_length=1, max_length=60, pattern=r"^[a-z0-9_]+$")
     content: str | None = Field(default=None, min_length=1, max_length=200)
     is_done: bool | None = None
     position: int | None = Field(default=None, ge=0)
@@ -706,6 +832,16 @@ class NotificationRuleCreate(BaseModel):
 class ParticipantCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=2, max_length=40, pattern=r"^[a-zA-Z0-9._-]+$")
+
+
+class ProjectStageCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=80)
+
+
+class ProjectStageUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=80)
 
 
 class TemplateCreate(BaseModel):
@@ -1064,6 +1200,151 @@ def get_project(project_id: int, current_user: dict[str, Any] = Depends(get_curr
     return row_to_dict(row)
 
 
+@app.get("/api/projects/{project_id}/stages")
+def list_project_stages(
+    project_id: int, current_user: dict[str, Any] = Depends(get_current_user)
+) -> list[dict[str, Any]]:
+    with get_db() as conn:
+        require_project_access(conn, project_id, current_user)
+        ensure_default_project_stages(conn, project_id)
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM project_stages
+            WHERE project_id=?
+            ORDER BY position ASC, id ASC
+            """,
+            (project_id,),
+        ).fetchall()
+        conn.commit()
+    return [row_to_dict(row) for row in rows]
+
+
+@app.post("/api/projects/{project_id}/stages", status_code=201)
+def create_project_stage(
+    project_id: int,
+    payload: ProjectStageCreate,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    stage_name = payload.name.strip()
+    if not stage_name:
+        raise HTTPException(status_code=400, detail="Stage name is required.")
+
+    with get_db() as conn:
+        require_project_owner(conn, project_id, current_user)
+        ensure_default_project_stages(conn, project_id)
+        duplicate = conn.execute(
+            """
+            SELECT id
+            FROM project_stages
+            WHERE project_id=? AND lower(stage_name)=lower(?)
+            """,
+            (project_id, stage_name),
+        ).fetchone()
+        if duplicate:
+            raise HTTPException(status_code=400, detail="Stage name already exists.")
+
+        stage_key = generate_unique_stage_key(conn, project_id, stage_name)
+        next_pos = conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS next_position FROM project_stages WHERE project_id=?",
+            (project_id,),
+        ).fetchone()
+        cur = conn.execute(
+            """
+            INSERT INTO project_stages (project_id, stage_key, stage_name, position)
+            VALUES (?, ?, ?, ?)
+            """,
+            (project_id, stage_key, stage_name, int(next_pos["next_position"])),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM project_stages WHERE id=?", (cur.lastrowid,)).fetchone()
+    return row_to_dict(row)
+
+
+@app.patch("/api/projects/{project_id}/stages/{stage_id}")
+def update_project_stage(
+    project_id: int,
+    stage_id: int,
+    payload: ProjectStageUpdate,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    stage_name = payload.name.strip()
+    if not stage_name:
+        raise HTTPException(status_code=400, detail="Stage name is required.")
+
+    with get_db() as conn:
+        require_project_owner(conn, project_id, current_user)
+        ensure_default_project_stages(conn, project_id)
+        current_row = conn.execute(
+            "SELECT * FROM project_stages WHERE id=? AND project_id=?",
+            (stage_id, project_id),
+        ).fetchone()
+        if not current_row:
+            raise HTTPException(status_code=404, detail="Stage not found.")
+        duplicate = conn.execute(
+            """
+            SELECT id
+            FROM project_stages
+            WHERE project_id=? AND lower(stage_name)=lower(?) AND id<>?
+            """,
+            (project_id, stage_name, stage_id),
+        ).fetchone()
+        if duplicate:
+            raise HTTPException(status_code=400, detail="Stage name already exists.")
+        conn.execute(
+            "UPDATE project_stages SET stage_name=? WHERE id=?",
+            (stage_name, stage_id),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM project_stages WHERE id=?", (stage_id,)).fetchone()
+    return row_to_dict(row)
+
+
+@app.delete("/api/projects/{project_id}/stages/{stage_id}")
+def delete_project_stage(
+    project_id: int,
+    stage_id: int,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, bool]:
+    with get_db() as conn:
+        require_project_owner(conn, project_id, current_user)
+        ensure_default_project_stages(conn, project_id)
+        current_row = conn.execute(
+            "SELECT * FROM project_stages WHERE id=? AND project_id=?",
+            (stage_id, project_id),
+        ).fetchone()
+        if not current_row:
+            raise HTTPException(status_code=404, detail="Stage not found.")
+
+        stage_count = conn.execute(
+            "SELECT COUNT(*) AS c FROM project_stages WHERE project_id=?",
+            (project_id,),
+        ).fetchone()
+        if int(stage_count["c"]) <= 1:
+            raise HTTPException(status_code=400, detail="At least one stage must remain.")
+
+        in_use = conn.execute(
+            """
+            SELECT COUNT(*) AS c
+            FROM project_checklist_items
+            WHERE project_id=? AND stage=?
+            """,
+            (project_id, current_row["stage_key"]),
+        ).fetchone()
+        if int(in_use["c"]) > 0:
+            raise HTTPException(status_code=400, detail="Cannot delete a stage that has checklist items.")
+
+        conn.execute("DELETE FROM project_stages WHERE id=?", (stage_id,))
+        remaining_rows = conn.execute(
+            "SELECT id FROM project_stages WHERE project_id=? ORDER BY position ASC, id ASC",
+            (project_id,),
+        ).fetchall()
+        for idx, row in enumerate(remaining_rows):
+            conn.execute("UPDATE project_stages SET position=? WHERE id=?", (idx, int(row["id"])))
+        conn.commit()
+    return {"ok": True}
+
+
 @app.get("/api/projects/{project_id}/participants")
 def list_project_participants(
     project_id: int, current_user: dict[str, Any] = Depends(get_current_user)
@@ -1172,9 +1453,11 @@ def create_project(
                 payload.due_date,
             ),
         )
-        ensure_project_owner_in_participants(conn, int(cur.lastrowid), owner)
+        new_project_id = int(cur.lastrowid)
+        ensure_project_owner_in_participants(conn, new_project_id, owner)
+        ensure_default_project_stages(conn, new_project_id)
         conn.commit()
-        row = conn.execute("SELECT * FROM projects WHERE id=?", (cur.lastrowid,)).fetchone()
+        row = conn.execute("SELECT * FROM projects WHERE id=?", (new_project_id,)).fetchone()
     return row_to_dict(row)
 
 
@@ -1240,29 +1523,29 @@ def list_project_checklists(
 ) -> list[dict[str, Any]]:
     with get_db() as conn:
         require_project_access(conn, project_id, current_user)
+        ensure_default_project_stages(conn, project_id)
         rows = conn.execute(
             """
-            SELECT *
-            FROM project_checklist_items
-            WHERE project_id=?
+            SELECT c.*, ps.stage_name
+            FROM project_checklist_items c
+            LEFT JOIN project_stages ps
+              ON ps.project_id = c.project_id
+             AND ps.stage_key = c.stage
+            WHERE c.project_id=?
             ORDER BY
-                CASE workflow_status
+                CASE c.workflow_status
                     WHEN 'upcoming' THEN 1
                     WHEN 'inprogress' THEN 2
                     WHEN 'done' THEN 3
                     ELSE 4
                 END,
-                position ASC,
-                CASE stage
-                    WHEN 'data_acquisition' THEN 1
-                    WHEN 'labeling' THEN 2
-                    WHEN 'development' THEN 3
-                    ELSE 4
-                END,
-                id ASC
+                c.position ASC,
+                COALESCE(ps.position, 999) ASC,
+                c.id ASC
             """,
             (project_id,),
         ).fetchall()
+        conn.commit()
     return [row_to_dict(row) for row in rows]
 
 
@@ -1272,6 +1555,7 @@ def create_checklist_item(
 ) -> dict[str, Any]:
     with get_db() as conn:
         require_project_access(conn, project_id, current_user)
+        ensure_project_stage_exists(conn, project_id, payload.stage)
         next_pos_row = conn.execute(
             """
             SELECT COALESCE(MAX(position), -1) + 1 AS next_position
@@ -1327,6 +1611,9 @@ def update_checklist_item(
 
         if "content" in updates:
             updates["content"] = str(updates["content"]).strip()
+        if "stage" in updates:
+            updates["stage"] = str(updates["stage"]).strip()
+            ensure_project_stage_exists(conn, int(current["project_id"]), updates["stage"])
 
         if "is_done" in updates:
             updates["is_done"] = 1 if updates["is_done"] else 0
@@ -2026,6 +2313,7 @@ def apply_template_to_project(
 ) -> dict[str, bool]:
     with get_db() as conn:
         require_project_access(conn, project_id, current_user)
+        ensure_default_project_stages(conn, project_id)
         template = conn.execute("SELECT id FROM checklist_templates WHERE id=?", (template_id,)).fetchone()
         if not template:
             raise HTTPException(status_code=404, detail="Template not found.")
@@ -2047,6 +2335,30 @@ def apply_template_to_project(
             """,
             (template_id,),
         ).fetchall()
+
+        for item in template_items:
+            stage_key = str(item["stage"])
+            stage_row = conn.execute(
+                "SELECT id FROM project_stages WHERE project_id=? AND stage_key=?",
+                (project_id, stage_key),
+            ).fetchone()
+            if not stage_row:
+                next_pos_row = conn.execute(
+                    "SELECT COALESCE(MAX(position), -1) + 1 AS next_position FROM project_stages WHERE project_id=?",
+                    (project_id,),
+                ).fetchone()
+                conn.execute(
+                    """
+                    INSERT INTO project_stages (project_id, stage_key, stage_name, position)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        project_id,
+                        stage_key,
+                        default_stage_name_from_key(stage_key),
+                        int(next_pos_row["next_position"]),
+                    ),
+                )
 
         conn.execute("DELETE FROM project_checklist_items WHERE project_id=?", (project_id,))
         for idx, item in enumerate(template_items):
