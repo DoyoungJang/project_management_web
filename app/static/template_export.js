@@ -1,6 +1,5 @@
 const { createApiClient, escapeHtml, parseApiError } = window.PMCommon;
 const api = createApiClient();
-const STAGE_ORDER = { data_acquisition: 1, labeling: 2, development: 3 };
 
 const els = {
   adminLink: document.getElementById("admin-link"),
@@ -35,19 +34,72 @@ function downloadJson(data, fileName) {
   URL.revokeObjectURL(url);
 }
 
-function normalizeTemplateItems(items) {
-  return (Array.isArray(items) ? items : [])
+function normalizeTemplateItems(items, stages) {
+  const stageOrder = new Map(
+    (Array.isArray(stages) ? stages : []).map((x) => [String(x.key || x.stage_key), Number(x.position || 0)])
+  );
+  const grouped = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    const stage = String(item.stage || "").trim();
+    const content = String(item.content || "").trim();
+    if (!stage || !content) continue;
+    if (!grouped.has(stage)) grouped.set(stage, []);
+    grouped.get(stage).push({
+      stage,
+      content,
+      position: Number.isFinite(Number(item.position)) ? Number(item.position) : 0,
+    });
+  }
+  const orderedStageKeys = Array.from(grouped.keys()).sort((a, b) => {
+    const ao = stageOrder.has(a) ? stageOrder.get(a) : 999999;
+    const bo = stageOrder.has(b) ? stageOrder.get(b) : 999999;
+    return ao - bo || String(a).localeCompare(String(b));
+  });
+  const out = [];
+  for (const stageKey of orderedStageKeys) {
+    const rows = grouped.get(stageKey).sort((a, b) => a.position - b.position);
+    rows.forEach((row, idx) => {
+      out.push({
+        stage: row.stage,
+        content: row.content,
+        position: idx,
+      });
+    });
+  }
+  return out;
+}
+
+function normalizeTemplateStages(stages, items) {
+  const out = [];
+  const keySet = new Set();
+  const sortedStages = (Array.isArray(stages) ? stages : [])
     .slice()
-    .sort((a, b) => {
-      const stageDiff = (STAGE_ORDER[a.stage] || 99) - (STAGE_ORDER[b.stage] || 99);
-      if (stageDiff !== 0) return stageDiff;
-      return Number(a.position || 0) - Number(b.position || 0);
-    })
-    .map((item, idx) => ({
-      stage: item.stage,
-      content: String(item.content || "").trim(),
-      position: idx,
-    }));
+    .sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
+
+  for (const stage of sortedStages) {
+    const key = String(stage.key || stage.stage_key || "").trim();
+    const name = String(stage.name || stage.stage_name || "").trim();
+    if (!key || !name || keySet.has(key)) continue;
+    keySet.add(key);
+    out.push({ key, name, position: out.length });
+  }
+
+  for (const item of Array.isArray(items) ? items : []) {
+    const key = String(item.stage || "").trim();
+    if (!key || keySet.has(key)) continue;
+    keySet.add(key);
+    out.push({ key, name: key, position: out.length });
+  }
+
+  if (!out.length) {
+    return [
+      { key: "data_acquisition", name: "1. 데이터 획득", position: 0 },
+      { key: "labeling", name: "2. 라벨링", position: 1 },
+      { key: "development", name: "3. 개발", position: 2 },
+    ];
+  }
+
+  return out;
 }
 
 function shouldFallbackExportApi(error) {
@@ -66,13 +118,18 @@ async function buildExportPayloadByClient(templateIds) {
 
   const templatePayloads = await Promise.all(
     selectedTemplates.map(async (tpl) => {
-      const items = await api.get(`/api/templates/${tpl.id}/items`);
+      const [stages, items] = await Promise.all([
+        api.get(`/api/templates/${tpl.id}/stages`),
+        api.get(`/api/templates/${tpl.id}/items`),
+      ]);
+      const normalizedStages = normalizeTemplateStages(stages, items);
       return {
         id: Number(tpl.id),
         name: tpl.name,
         description: tpl.description || "",
         creator_name: tpl.creator_name || "",
-        items: normalizeTemplateItems(items),
+        stages: normalizedStages,
+        items: normalizeTemplateItems(items, normalizedStages),
       };
     })
   );

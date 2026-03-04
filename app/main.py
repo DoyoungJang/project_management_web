@@ -227,6 +227,71 @@ def ensure_default_project_stages(conn: sqlite3.Connection, project_id: int) -> 
         )
 
 
+def generate_unique_template_stage_key(conn: sqlite3.Connection, template_id: int, stage_name: str) -> str:
+    base = normalize_stage_key(stage_name)
+    candidate = base
+    suffix = 2
+    while conn.execute(
+        "SELECT 1 FROM checklist_template_stages WHERE template_id=? AND stage_key=?",
+        (template_id, candidate),
+    ).fetchone():
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def ensure_default_template_stages(conn: sqlite3.Connection, template_id: int) -> None:
+    count_row = conn.execute(
+        "SELECT COUNT(*) AS c FROM checklist_template_stages WHERE template_id=?",
+        (template_id,),
+    ).fetchone()
+    if int(count_row["c"]) == 0:
+        for idx, stage in enumerate(DEFAULT_PROJECT_STAGES):
+            conn.execute(
+                """
+                INSERT INTO checklist_template_stages (template_id, stage_key, stage_name, position)
+                VALUES (?, ?, ?, ?)
+                """,
+                (template_id, stage["key"], stage["name"], idx),
+            )
+
+    item_stage_rows = conn.execute(
+        """
+        SELECT DISTINCT stage
+        FROM checklist_template_items
+        WHERE template_id=?
+        """,
+        (template_id,),
+    ).fetchall()
+    existing_stage_keys = {
+        str(row["stage_key"])
+        for row in conn.execute(
+            "SELECT stage_key FROM checklist_template_stages WHERE template_id=?",
+            (template_id,),
+        ).fetchall()
+    }
+
+    next_position = conn.execute(
+        "SELECT COALESCE(MAX(position), -1) + 1 AS next_position FROM checklist_template_stages WHERE template_id=?",
+        (template_id,),
+    ).fetchone()
+    insert_pos = int(next_position["next_position"])
+
+    for row in item_stage_rows:
+        stage_key = str(row["stage"] or "").strip()
+        if not stage_key or stage_key in existing_stage_keys:
+            continue
+        conn.execute(
+            """
+            INSERT INTO checklist_template_stages (template_id, stage_key, stage_name, position)
+            VALUES (?, ?, ?, ?)
+            """,
+            (template_id, stage_key, default_stage_name_from_key(stage_key), insert_pos),
+        )
+        existing_stage_keys.add(stage_key)
+        insert_pos += 1
+
+
 def ensure_project_stage_exists(conn: sqlite3.Connection, project_id: int, stage_key: str) -> sqlite3.Row:
     ensure_default_project_stages(conn, project_id)
     row = conn.execute(
@@ -350,10 +415,21 @@ def init_db() -> None:
                 FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT
             );
 
+            CREATE TABLE IF NOT EXISTS checklist_template_stages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                template_id INTEGER NOT NULL,
+                stage_key TEXT NOT NULL,
+                stage_name TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (template_id, stage_key),
+                FOREIGN KEY (template_id) REFERENCES checklist_templates(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS checklist_template_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 template_id INTEGER NOT NULL,
-                stage TEXT NOT NULL CHECK (stage IN ('data_acquisition', 'labeling', 'development')),
+                stage TEXT NOT NULL,
                 content TEXT NOT NULL,
                 position INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -415,6 +491,35 @@ def init_db() -> None:
             )
             conn.commit()
 
+        template_items_sql_row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='checklist_template_items'"
+        ).fetchone()
+        template_items_table_sql = str(template_items_sql_row["sql"] or "") if template_items_sql_row else ""
+        if "CHECK (stage IN ('data_acquisition', 'labeling', 'development'))" in template_items_table_sql:
+            conn.executescript(
+                """
+                ALTER TABLE checklist_template_items RENAME TO checklist_template_items_legacy;
+
+                CREATE TABLE checklist_template_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    template_id INTEGER NOT NULL,
+                    stage TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (template_id) REFERENCES checklist_templates(id) ON DELETE CASCADE
+                );
+
+                INSERT INTO checklist_template_items
+                    (id, template_id, stage, content, position, created_at)
+                SELECT id, template_id, stage, content, position, created_at
+                FROM checklist_template_items_legacy;
+
+                DROP TABLE checklist_template_items_legacy;
+                """
+            )
+            conn.commit()
+
         stale_sessions = conn.execute(
             "SELECT id FROM user_sessions WHERE csrf_token IS NULL OR csrf_token=''"
         ).fetchall()
@@ -469,6 +574,9 @@ def init_db() -> None:
         project_rows = conn.execute("SELECT id FROM projects").fetchall()
         for project_row in project_rows:
             ensure_default_project_stages(conn, int(project_row["id"]))
+        template_rows = conn.execute("SELECT id FROM checklist_templates").fetchall()
+        for template_row in template_rows:
+            ensure_default_template_stages(conn, int(template_row["id"]))
         conn.commit()
 
         admin_exists = conn.execute("SELECT id FROM users WHERE is_admin=1 LIMIT 1").fetchone()
@@ -753,6 +861,17 @@ def require_project_access(
     return row
 
 
+def require_template_edit_access(
+    conn: sqlite3.Connection, template_id: int, current_user: dict[str, Any]
+) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM checklist_templates WHERE id=?", (template_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Template not found.")
+    if row["created_by"] != current_user["id"] and not current_user["is_admin"]:
+        raise HTTPException(status_code=403, detail="No permission to edit this template.")
+    return row
+
+
 class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=2, max_length=40)
@@ -856,15 +975,37 @@ class TemplateUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=300)
 
 
+class TemplateStageCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=80)
+
+
+class TemplateStageUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=80)
+
+
+class TemplateStageDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str = Field(min_length=1, max_length=60, pattern=r"^[a-z0-9_]+$")
+    name: str = Field(min_length=1, max_length=80)
+    position: int = Field(ge=0)
+
+
+class TemplateStagesReplaceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    stages: list[TemplateStageDraft] = Field(min_length=1, max_length=300)
+
+
 class TemplateItemCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    stage: str = Field(pattern="^(data_acquisition|labeling|development)$")
+    stage: str = Field(min_length=1, max_length=60, pattern=r"^[a-z0-9_]+$")
     content: str = Field(min_length=1, max_length=200)
 
 
 class TemplateItemDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    stage: str = Field(pattern="^(data_acquisition|labeling|development)$")
+    stage: str = Field(min_length=1, max_length=60, pattern=r"^[a-z0-9_]+$")
     content: str = Field(min_length=1, max_length=200)
     position: int = Field(ge=0)
 
@@ -876,8 +1017,15 @@ class TemplateItemsReplaceRequest(BaseModel):
 
 class TemplateRestoreItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    stage: str = Field(pattern="^(data_acquisition|labeling|development)$")
+    stage: str = Field(min_length=1, max_length=60, pattern=r"^[a-z0-9_]+$")
     content: str = Field(min_length=1, max_length=200)
+    position: int = Field(ge=0)
+
+
+class TemplateRestoreStage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str = Field(min_length=1, max_length=60, pattern=r"^[a-z0-9_]+$")
+    name: str = Field(min_length=1, max_length=80)
     position: int = Field(ge=0)
 
 
@@ -885,6 +1033,7 @@ class TemplateRestoreEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=2, max_length=80)
     description: str = Field(default="", max_length=300)
+    stages: list[TemplateRestoreStage] = Field(default_factory=list, max_length=300)
     items: list[TemplateRestoreItem] = Field(default_factory=list, max_length=2000)
 
 
@@ -1950,35 +2099,77 @@ def build_templates_export_payload(
 
     template_ids = [int(row["id"]) for row in template_rows]
     item_placeholders = ",".join(["?"] * len(template_ids))
-    item_rows = conn.execute(
+    stage_rows = conn.execute(
         f"""
-        SELECT template_id, stage, content, position
-        FROM checklist_template_items
+        SELECT template_id, stage_key, stage_name, position
+        FROM checklist_template_stages
         WHERE template_id IN ({item_placeholders})
-        ORDER BY
-            template_id ASC,
-            CASE stage
-                WHEN 'data_acquisition' THEN 1
-                WHEN 'labeling' THEN 2
-                WHEN 'development' THEN 3
-                ELSE 4
-            END,
-            position ASC,
-            id ASC
+        ORDER BY template_id ASC, position ASC, id ASC
         """,
         tuple(template_ids),
     ).fetchall()
 
-    items_by_template: dict[int, list[dict[str, Any]]] = {}
-    for row in item_rows:
+    item_rows = conn.execute(
+        f"""
+        SELECT
+            i.template_id,
+            i.stage,
+            i.content,
+            i.position,
+            COALESCE(s.position, 999999) AS stage_position
+        FROM checklist_template_items i
+        LEFT JOIN checklist_template_stages s
+          ON s.template_id = i.template_id
+         AND s.stage_key = i.stage
+        WHERE i.template_id IN ({item_placeholders})
+        ORDER BY
+            i.template_id ASC,
+            stage_position ASC,
+            i.position ASC,
+            i.id ASC
+        """,
+        tuple(template_ids),
+    ).fetchall()
+
+    stages_by_template: dict[int, list[dict[str, Any]]] = {}
+    for row in stage_rows:
         key = int(row["template_id"])
-        items_by_template.setdefault(key, []).append(
+        stages_by_template.setdefault(key, []).append(
             {
-                "stage": row["stage"],
-                "content": row["content"],
+                "key": row["stage_key"],
+                "name": row["stage_name"],
                 "position": int(row["position"]),
             }
         )
+
+    items_by_template: dict[int, list[dict[str, Any]]] = {}
+    stage_pos_by_template: dict[int, dict[str, int]] = {}
+    for tpl_id, stages in stages_by_template.items():
+        stage_pos_by_template[tpl_id] = {str(s["key"]): int(s["position"]) for s in stages}
+
+    grouped_items: dict[int, dict[str, list[sqlite3.Row]]] = {}
+    for row in item_rows:
+        tpl_id = int(row["template_id"])
+        grouped_items.setdefault(tpl_id, {}).setdefault(str(row["stage"]), []).append(row)
+
+    for tpl_id, stage_rows_by_key in grouped_items.items():
+        stage_order = stage_pos_by_template.get(tpl_id, {})
+        ordered_stage_keys = sorted(
+            stage_rows_by_key.keys(),
+            key=lambda k: (stage_order.get(k, 999999), k),
+        )
+        out: list[dict[str, Any]] = []
+        for stage_key in ordered_stage_keys:
+            rows = sorted(stage_rows_by_key[stage_key], key=lambda x: int(x["position"]))
+            for idx, row in enumerate(rows):
+                out.append(
+                    {
+                        "stage": stage_key,
+                        "content": row["content"],
+                        "position": idx,
+                    }
+                )
+        items_by_template[tpl_id] = out
 
     templates: list[dict[str, Any]] = []
     for row in template_rows:
@@ -1991,6 +2182,7 @@ def build_templates_export_payload(
                 "created_at": row["created_at"],
                 "creator_username": row["creator_username"],
                 "creator_name": row["creator_name"],
+                "stages": stages_by_template.get(template_id, []),
                 "items": items_by_template.get(template_id, []),
             }
         )
@@ -2028,7 +2220,6 @@ def restore_templates(
     payload: TemplatesRestoreRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
-    stage_order = {"data_acquisition": 1, "labeling": 2, "development": 3}
     incoming_names = [tpl.name.strip() for tpl in payload.templates]
 
     if len(set(incoming_names)) != len(incoming_names):
@@ -2048,19 +2239,44 @@ def restore_templates(
             name = tpl.name.strip()
             description = (tpl.description or "").strip()
 
-            normalized_items: list[tuple[str, str, int]] = []
-            grouped: dict[str, list[TemplateRestoreItem]] = {
-                "data_acquisition": [],
-                "labeling": [],
-                "development": [],
-            }
-            for item in tpl.items:
-                grouped[item.stage].append(item)
+            stage_defs: list[tuple[str, str, int]] = []
+            stage_by_key: dict[str, tuple[str, str, int]] = {}
 
-            for stage in ("data_acquisition", "labeling", "development"):
-                items = sorted(grouped[stage], key=lambda x: x.position)
+            if tpl.stages:
+                for stage in sorted(tpl.stages, key=lambda x: x.position):
+                    key = stage.key.strip()
+                    label = stage.name.strip()
+                    if not key or not label:
+                        continue
+                    if key in stage_by_key:
+                        raise HTTPException(status_code=400, detail=f"Duplicate stage key in restore payload: {key}")
+                    stage_def = (key, label, int(stage.position))
+                    stage_by_key[key] = stage_def
+                stage_defs = sorted(stage_by_key.values(), key=lambda x: x[2])
+            else:
+                for idx, default_stage in enumerate(DEFAULT_PROJECT_STAGES):
+                    stage_def = (default_stage["key"], default_stage["name"], idx)
+                    stage_defs.append(stage_def)
+                    stage_by_key[default_stage["key"]] = stage_def
+
+            for item in tpl.items:
+                stage_key = item.stage.strip()
+                if stage_key in stage_by_key:
+                    continue
+                next_pos = len(stage_defs)
+                stage_def = (stage_key, default_stage_name_from_key(stage_key), next_pos)
+                stage_defs.append(stage_def)
+                stage_by_key[stage_key] = stage_def
+
+            grouped: dict[str, list[TemplateRestoreItem]] = {key: [] for key, _, _ in stage_defs}
+            for item in tpl.items:
+                grouped.setdefault(item.stage, []).append(item)
+
+            normalized_items: list[tuple[str, str, int]] = []
+            for stage_key, _, _ in sorted(stage_defs, key=lambda x: x[2]):
+                items = sorted(grouped.get(stage_key, []), key=lambda x: x.position)
                 for idx, item in enumerate(items):
-                    normalized_items.append((stage, item.content.strip(), idx))
+                    normalized_items.append((stage_key, item.content.strip(), idx))
 
             existing = conn.execute(
                 "SELECT id, created_by FROM checklist_templates WHERE name=?",
@@ -2082,7 +2298,16 @@ def restore_templates(
                     "UPDATE checklist_templates SET description=? WHERE id=?",
                     (description, template_id),
                 )
+                conn.execute("DELETE FROM checklist_template_stages WHERE template_id=?", (template_id,))
                 conn.execute("DELETE FROM checklist_template_items WHERE template_id=?", (template_id,))
+                for stage_key, stage_name, pos in sorted(stage_defs, key=lambda x: x[2]):
+                    conn.execute(
+                        """
+                        INSERT INTO checklist_template_stages (template_id, stage_key, stage_name, position)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (template_id, stage_key, stage_name, pos),
+                    )
                 for stage, content, pos in normalized_items:
                     conn.execute(
                         """
@@ -2102,8 +2327,15 @@ def restore_templates(
                 (name, description, current_user["id"]),
             )
             template_id = int(cur.lastrowid)
-            ordered_items = sorted(normalized_items, key=lambda x: (stage_order[x[0]], x[2]))
-            for stage, content, pos in ordered_items:
+            for stage_key, stage_name, pos in sorted(stage_defs, key=lambda x: x[2]):
+                conn.execute(
+                    """
+                    INSERT INTO checklist_template_stages (template_id, stage_key, stage_name, position)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (template_id, stage_key, stage_name, pos),
+                )
+            for stage, content, pos in normalized_items:
                 conn.execute(
                     """
                     INSERT INTO checklist_template_items (template_id, stage, content, position)
@@ -2141,8 +2373,10 @@ def create_template(
             """,
             (payload.name.strip(), payload.description.strip(), current_user["id"]),
         )
+        template_id = int(cur.lastrowid)
+        ensure_default_template_stages(conn, template_id)
         conn.commit()
-        row = conn.execute("SELECT * FROM checklist_templates WHERE id=?", (cur.lastrowid,)).fetchone()
+        row = conn.execute("SELECT * FROM checklist_templates WHERE id=?", (template_id,)).fetchone()
     return row_to_dict(row)
 
 
@@ -2196,6 +2430,210 @@ def delete_template(
     return {"ok": True}
 
 
+@app.get("/api/templates/{template_id}/stages")
+def list_template_stages(
+    template_id: int, _: dict[str, Any] = Depends(get_current_user)
+) -> list[dict[str, Any]]:
+    with get_db() as conn:
+        template = conn.execute("SELECT id FROM checklist_templates WHERE id=?", (template_id,)).fetchone()
+        if not template:
+            raise HTTPException(status_code=404, detail="Template not found.")
+        ensure_default_template_stages(conn, template_id)
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM checklist_template_stages
+            WHERE template_id=?
+            ORDER BY position ASC, id ASC
+            """,
+            (template_id,),
+        ).fetchall()
+        conn.commit()
+    return [row_to_dict(row) for row in rows]
+
+
+@app.post("/api/templates/{template_id}/stages", status_code=201)
+def create_template_stage(
+    template_id: int,
+    payload: TemplateStageCreate,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    stage_name = payload.name.strip()
+    if not stage_name:
+        raise HTTPException(status_code=400, detail="Stage name is required.")
+
+    with get_db() as conn:
+        require_template_edit_access(conn, template_id, current_user)
+        ensure_default_template_stages(conn, template_id)
+        duplicate = conn.execute(
+            """
+            SELECT id
+            FROM checklist_template_stages
+            WHERE template_id=? AND lower(stage_name)=lower(?)
+            """,
+            (template_id, stage_name),
+        ).fetchone()
+        if duplicate:
+            raise HTTPException(status_code=400, detail="Stage name already exists.")
+
+        stage_key = generate_unique_template_stage_key(conn, template_id, stage_name)
+        next_pos = conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS next_position FROM checklist_template_stages WHERE template_id=?",
+            (template_id,),
+        ).fetchone()
+        cur = conn.execute(
+            """
+            INSERT INTO checklist_template_stages (template_id, stage_key, stage_name, position)
+            VALUES (?, ?, ?, ?)
+            """,
+            (template_id, stage_key, stage_name, int(next_pos["next_position"])),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM checklist_template_stages WHERE id=?", (cur.lastrowid,)).fetchone()
+    return row_to_dict(row)
+
+
+@app.put("/api/templates/{template_id}/stages")
+def replace_template_stages(
+    template_id: int,
+    payload: TemplateStagesReplaceRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, bool]:
+    ordered_stages = sorted(payload.stages, key=lambda x: x.position)
+    keys_seen: set[str] = set()
+    names_seen: set[str] = set()
+    normalized: list[tuple[str, str, int]] = []
+    for idx, stage in enumerate(ordered_stages):
+        key = stage.key.strip()
+        name = stage.name.strip()
+        if key in keys_seen:
+            raise HTTPException(status_code=400, detail=f"Duplicate stage key: {key}")
+        folded_name = name.lower()
+        if folded_name in names_seen:
+            raise HTTPException(status_code=400, detail=f"Duplicate stage name: {name}")
+        keys_seen.add(key)
+        names_seen.add(folded_name)
+        normalized.append((key, name, idx))
+
+    with get_db() as conn:
+        require_template_edit_access(conn, template_id, current_user)
+        conn.execute("DELETE FROM checklist_template_stages WHERE template_id=?", (template_id,))
+        for key, name, pos in normalized:
+            conn.execute(
+                """
+                INSERT INTO checklist_template_stages (template_id, stage_key, stage_name, position)
+                VALUES (?, ?, ?, ?)
+                """,
+                (template_id, key, name, pos),
+            )
+
+        valid_stage_keys = [key for key, _, _ in normalized]
+        placeholders = ",".join(["?"] * len(valid_stage_keys))
+        conn.execute(
+            f"DELETE FROM checklist_template_items WHERE template_id=? AND stage NOT IN ({placeholders})",
+            (template_id, *valid_stage_keys),
+        )
+        for stage_key in valid_stage_keys:
+            rows = conn.execute(
+                """
+                SELECT id
+                FROM checklist_template_items
+                WHERE template_id=? AND stage=?
+                ORDER BY position ASC, id ASC
+                """,
+                (template_id, stage_key),
+            ).fetchall()
+            for idx, row in enumerate(rows):
+                conn.execute(
+                    "UPDATE checklist_template_items SET position=? WHERE id=?",
+                    (idx, int(row["id"])),
+                )
+        conn.commit()
+    return {"ok": True}
+
+
+@app.patch("/api/templates/{template_id}/stages/{stage_id}")
+def update_template_stage(
+    template_id: int,
+    stage_id: int,
+    payload: TemplateStageUpdate,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    stage_name = payload.name.strip()
+    if not stage_name:
+        raise HTTPException(status_code=400, detail="Stage name is required.")
+
+    with get_db() as conn:
+        require_template_edit_access(conn, template_id, current_user)
+        ensure_default_template_stages(conn, template_id)
+        current_row = conn.execute(
+            "SELECT * FROM checklist_template_stages WHERE id=? AND template_id=?",
+            (stage_id, template_id),
+        ).fetchone()
+        if not current_row:
+            raise HTTPException(status_code=404, detail="Stage not found.")
+
+        duplicate = conn.execute(
+            """
+            SELECT id
+            FROM checklist_template_stages
+            WHERE template_id=? AND lower(stage_name)=lower(?) AND id<>?
+            """,
+            (template_id, stage_name, stage_id),
+        ).fetchone()
+        if duplicate:
+            raise HTTPException(status_code=400, detail="Stage name already exists.")
+
+        conn.execute(
+            "UPDATE checklist_template_stages SET stage_name=? WHERE id=?",
+            (stage_name, stage_id),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM checklist_template_stages WHERE id=?", (stage_id,)).fetchone()
+    return row_to_dict(row)
+
+
+@app.delete("/api/templates/{template_id}/stages/{stage_id}")
+def delete_template_stage(
+    template_id: int,
+    stage_id: int,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, bool]:
+    with get_db() as conn:
+        require_template_edit_access(conn, template_id, current_user)
+        ensure_default_template_stages(conn, template_id)
+        stage_row = conn.execute(
+            "SELECT * FROM checklist_template_stages WHERE id=? AND template_id=?",
+            (stage_id, template_id),
+        ).fetchone()
+        if not stage_row:
+            raise HTTPException(status_code=404, detail="Stage not found.")
+
+        stage_count = conn.execute(
+            "SELECT COUNT(*) AS c FROM checklist_template_stages WHERE template_id=?",
+            (template_id,),
+        ).fetchone()
+        if int(stage_count["c"]) <= 1:
+            raise HTTPException(status_code=400, detail="At least one stage is required.")
+
+        stage_key = str(stage_row["stage_key"])
+        conn.execute(
+            "DELETE FROM checklist_template_items WHERE template_id=? AND stage=?",
+            (template_id, stage_key),
+        )
+        conn.execute("DELETE FROM checklist_template_stages WHERE id=?", (stage_id,))
+
+        remain_rows = conn.execute(
+            "SELECT id FROM checklist_template_stages WHERE template_id=? ORDER BY position ASC, id ASC",
+            (template_id,),
+        ).fetchall()
+        for idx, row in enumerate(remain_rows):
+            conn.execute("UPDATE checklist_template_stages SET position=? WHERE id=?", (idx, int(row["id"])))
+
+        conn.commit()
+    return {"ok": True}
+
+
 @app.get("/api/templates/{template_id}/items")
 def list_template_items(
     template_id: int, _: dict[str, Any] = Depends(get_current_user)
@@ -2204,23 +2642,20 @@ def list_template_items(
         template = conn.execute("SELECT id FROM checklist_templates WHERE id=?", (template_id,)).fetchone()
         if not template:
             raise HTTPException(status_code=404, detail="Template not found.")
+        ensure_default_template_stages(conn, template_id)
         rows = conn.execute(
             """
-            SELECT *
-            FROM checklist_template_items
-            WHERE template_id=?
-            ORDER BY
-                CASE stage
-                    WHEN 'data_acquisition' THEN 1
-                    WHEN 'labeling' THEN 2
-                    WHEN 'development' THEN 3
-                    ELSE 4
-                END,
-                position ASC,
-                id ASC
+            SELECT i.*
+            FROM checklist_template_items i
+            LEFT JOIN checklist_template_stages s
+              ON s.template_id = i.template_id
+             AND s.stage_key = i.stage
+            WHERE i.template_id=?
+            ORDER BY COALESCE(s.position, 999999) ASC, i.position ASC, i.id ASC
             """,
             (template_id,),
         ).fetchall()
+        conn.commit()
     return [row_to_dict(row) for row in rows]
 
 
@@ -2229,11 +2664,14 @@ def create_template_item(
     template_id: int, payload: TemplateItemCreate, current_user: dict[str, Any] = Depends(get_current_user)
 ) -> dict[str, Any]:
     with get_db() as conn:
-        template = conn.execute("SELECT * FROM checklist_templates WHERE id=?", (template_id,)).fetchone()
-        if not template:
-            raise HTTPException(status_code=404, detail="Template not found.")
-        if template["created_by"] != current_user["id"] and not current_user["is_admin"]:
-            raise HTTPException(status_code=403, detail="No permission to edit this template.")
+        require_template_edit_access(conn, template_id, current_user)
+        ensure_default_template_stages(conn, template_id)
+        stage_row = conn.execute(
+            "SELECT id FROM checklist_template_stages WHERE template_id=? AND stage_key=?",
+            (template_id, payload.stage),
+        ).fetchone()
+        if not stage_row:
+            raise HTTPException(status_code=400, detail="Invalid stage key.")
 
         next_pos_row = conn.execute(
             """
@@ -2286,11 +2724,18 @@ def replace_template_items(
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, bool]:
     with get_db() as conn:
-        template = conn.execute("SELECT * FROM checklist_templates WHERE id=?", (template_id,)).fetchone()
-        if not template:
-            raise HTTPException(status_code=404, detail="Template not found.")
-        if template["created_by"] != current_user["id"] and not current_user["is_admin"]:
-            raise HTTPException(status_code=403, detail="No permission to edit this template.")
+        require_template_edit_access(conn, template_id, current_user)
+        ensure_default_template_stages(conn, template_id)
+        valid_stage_keys = {
+            str(row["stage_key"])
+            for row in conn.execute(
+                "SELECT stage_key FROM checklist_template_stages WHERE template_id=?",
+                (template_id,),
+            ).fetchall()
+        }
+        invalid_stages = sorted({item.stage for item in payload.items if item.stage not in valid_stage_keys})
+        if invalid_stages:
+            raise HTTPException(status_code=400, detail=f"Invalid stage keys: {', '.join(invalid_stages)}")
 
         conn.execute("DELETE FROM checklist_template_items WHERE template_id=?", (template_id,))
         for item in payload.items:
@@ -2317,27 +2762,35 @@ def apply_template_to_project(
         template = conn.execute("SELECT id FROM checklist_templates WHERE id=?", (template_id,)).fetchone()
         if not template:
             raise HTTPException(status_code=404, detail="Template not found.")
+        ensure_default_template_stages(conn, template_id)
 
-        template_items = conn.execute(
+        template_stages = conn.execute(
             """
-            SELECT stage, content, position
-            FROM checklist_template_items
+            SELECT stage_key, stage_name, position
+            FROM checklist_template_stages
             WHERE template_id=?
-            ORDER BY
-                CASE stage
-                    WHEN 'data_acquisition' THEN 1
-                    WHEN 'labeling' THEN 2
-                    WHEN 'development' THEN 3
-                    ELSE 4
-                END,
-                position ASC,
-                id ASC
+            ORDER BY position ASC, id ASC
             """,
             (template_id,),
         ).fetchall()
 
-        for item in template_items:
-            stage_key = str(item["stage"])
+        template_items = conn.execute(
+            """
+            SELECT i.stage, i.content, i.position
+            FROM checklist_template_items i
+            LEFT JOIN checklist_template_stages s
+              ON s.template_id = i.template_id
+             AND s.stage_key = i.stage
+            WHERE i.template_id=?
+            ORDER BY COALESCE(s.position, 999999) ASC, i.position ASC, i.id ASC
+            """,
+            (template_id,),
+        ).fetchall()
+
+        for stage in template_stages:
+            stage_key = str(stage["stage_key"])
+            stage_name = str(stage["stage_name"])
+            stage_position = int(stage["position"])
             stage_row = conn.execute(
                 "SELECT id FROM project_stages WHERE project_id=? AND stage_key=?",
                 (project_id, stage_key),
@@ -2355,10 +2808,23 @@ def apply_template_to_project(
                     (
                         project_id,
                         stage_key,
-                        default_stage_name_from_key(stage_key),
-                        int(next_pos_row["next_position"]),
+                        stage_name,
+                        stage_position,
                     ),
                 )
+            else:
+                conn.execute(
+                    "UPDATE project_stages SET stage_name=?, position=? WHERE project_id=? AND stage_key=?",
+                    (stage_name, stage_position, project_id, stage_key),
+                )
+
+        keep_stage_keys = [str(stage["stage_key"]) for stage in template_stages]
+        if keep_stage_keys:
+            placeholders = ",".join(["?"] * len(keep_stage_keys))
+            conn.execute(
+                f"DELETE FROM project_stages WHERE project_id=? AND stage_key NOT IN ({placeholders})",
+                (project_id, *keep_stage_keys),
+            )
 
         conn.execute("DELETE FROM project_checklist_items WHERE project_id=?", (project_id,))
         for idx, item in enumerate(template_items):
