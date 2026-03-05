@@ -20,7 +20,7 @@ if (!projectId) {
   throw new Error("Invalid project_id");
 }
 
-const { createApiClient, escapeHtml, parseApiError } = window.PMCommon;
+const { createApiClient, escapeHtml, parseApiError, applyUserTheme } = window.PMCommon;
 const api = createApiClient();
 
 const els = {
@@ -44,6 +44,7 @@ function stageLabel(stage) {
 
 async function loadSession() {
   const me = await api.get("/api/auth/me");
+  applyUserTheme(me);
   if (me.is_admin) els.adminLink.classList.remove("hidden");
 }
 

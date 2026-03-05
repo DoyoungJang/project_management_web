@@ -1,8 +1,10 @@
-const { createApiClient, escapeHtml, parseApiError } = window.PMCommon;
+const { createApiClient, escapeHtml, parseApiError, applyUserTheme } = window.PMCommon;
 const api = createApiClient();
 
 const els = {
   userInfo: document.getElementById("user-info"),
+  heroTitle: document.getElementById("dashboard-hero-title"),
+  heroSubtitle: document.getElementById("dashboard-hero-subtitle"),
   adminLink: document.getElementById("admin-link"),
   logoutBtn: document.getElementById("logout-btn"),
   todayNotifications: document.getElementById("today-notifications"),
@@ -24,6 +26,17 @@ let projects = [];
 let currentUser = null;
 let upcomingItems = [];
 let upcomingRelationFilter = "all";
+
+function renderSiteBranding(branding) {
+  if (els.heroTitle) {
+    els.heroTitle.textContent = String(branding?.dashboard_title || "Company Project Hub");
+  }
+  if (els.heroSubtitle) {
+    els.heroSubtitle.textContent = String(
+      branding?.dashboard_subtitle || "프로젝트와 작업을 한 화면에서 관리하세요."
+    );
+  }
+}
 
 function statusLabel(raw) {
   const map = {
@@ -118,6 +131,7 @@ function renderUpcomingItems(items) {
 async function loadSession() {
   const me = await api.get("/api/auth/me");
   currentUser = me;
+  applyUserTheme(me);
   els.userInfo.textContent = `${me.display_name} (${me.username})`;
   if (me.is_admin) els.adminLink.classList.remove("hidden");
 
@@ -137,6 +151,11 @@ async function loadDashboard() {
 async function loadUpcomingItems() {
   const items = await api.get("/api/my/checklists/upcoming?days=30");
   renderUpcomingItems(items);
+}
+
+async function loadSiteBranding() {
+  const branding = await api.get("/api/site-branding");
+  renderSiteBranding(branding);
 }
 
 async function loadProjects() {
@@ -272,8 +291,10 @@ async function refreshAll() {
 }
 
 Promise.resolve()
-  .then(loadSession)
-  .then(refreshAll)
+  .then(async () => {
+    await loadSession();
+    await Promise.all([loadSiteBranding(), refreshAll()]);
+  })
   .catch((err) => {
     console.error(err);
     if (!String(err.message).includes("Unauthorized")) {

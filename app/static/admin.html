@@ -19,6 +19,23 @@
 
     <main class="layout">
       <section class="panel">
+        <h2>대시보드 문구 설정</h2>
+        <p class="item__meta">메인 페이지 상단 제목/설명을 변경합니다.</p>
+        <form id="site-branding-form" class="form-grid">
+          <input id="dashboard-title-input" name="dashboard_title" placeholder="상단 제목" minlength="2" maxlength="120" required />
+          <input
+            id="dashboard-subtitle-input"
+            name="dashboard_subtitle"
+            placeholder="상단 설명"
+            minlength="2"
+            maxlength="300"
+            required
+          />
+          <button type="submit">문구 저장</button>
+        </form>
+      </section>
+
+      <section class="panel">
         <h2>사용자 생성</h2>
         <form id="create-user-form" class="form-grid">
           <input name="username" placeholder="아이디" required minlength="2" />
@@ -63,7 +80,7 @@
         </div>
       </section>
     </main>
-    <script src="/static/common.js?v=20260301_2"></script>
-    <script src="/static/admin.js?v=20260301_1"></script>
+    <script src="/static/common.js?v=20260305_1"></script>
+    <script src="/static/admin.js?v=20260305_2"></script>
   </body>
 </html>

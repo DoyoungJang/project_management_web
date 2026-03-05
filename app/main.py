@@ -28,6 +28,8 @@ CSRF_COOKIE_NAME = "csrf_token"
 SAFE_SAMESITE_VALUES = {"lax", "strict", "none"}
 DEFAULT_CORS_ORIGINS = ["http://127.0.0.1:8000", "http://127.0.0.1:8080", "http://localhost:8000", "http://localhost:8080"]
 CSRF_EXEMPT_PATHS = {"/api/auth/login", "/api/auth/register", "/api/health"}
+DEFAULT_DASHBOARD_TITLE = "Company Project Hub"
+DEFAULT_DASHBOARD_SUBTITLE = "프로젝트와 작업을 한 화면에서 관리하세요."
 DEFAULT_PROJECT_STAGES = [
     {"key": "data_acquisition", "name": "1. 데이터 획득"},
     {"key": "labeling", "name": "2. 라벨링"},
@@ -338,6 +340,12 @@ def init_db() -> None:
                 updated_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -441,6 +449,7 @@ def init_db() -> None:
 
         ensure_column(conn, "users", "auth_provider", "TEXT NOT NULL DEFAULT 'local'")
         ensure_column(conn, "users", "email", "TEXT")
+        ensure_column(conn, "users", "theme_color", "TEXT NOT NULL DEFAULT '#0f6d66'")
         ensure_column(conn, "user_sessions", "csrf_token", "TEXT")
         ensure_column(conn, "project_checklist_items", "target_date", "TEXT")
         ensure_column(conn, "project_checklist_items", "workflow_status", "TEXT NOT NULL DEFAULT 'upcoming'")
@@ -565,6 +574,38 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            UPDATE users
+            SET theme_color = '#0f6d66'
+            WHERE theme_color IS NULL OR trim(theme_color) = ''
+            """
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO app_settings (key, value)
+            VALUES
+                ('dashboard_title', ?),
+                ('dashboard_subtitle', ?)
+            """,
+            (DEFAULT_DASHBOARD_TITLE, DEFAULT_DASHBOARD_SUBTITLE),
+        )
+        conn.execute(
+            """
+            UPDATE app_settings
+            SET value = ?
+            WHERE key='dashboard_title' AND trim(value) = ''
+            """,
+            (DEFAULT_DASHBOARD_TITLE,),
+        )
+        conn.execute(
+            """
+            UPDATE app_settings
+            SET value = ?
+            WHERE key='dashboard_subtitle' AND trim(value) = ''
+            """,
+            (DEFAULT_DASHBOARD_SUBTITLE,),
+        )
+        conn.execute(
+            """
             INSERT OR IGNORE INTO project_participants (project_id, user_id)
             SELECT p.id, u.id
             FROM projects p
@@ -608,6 +649,21 @@ def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     return dict(row)
 
 
+def get_site_setting(conn: sqlite3.Connection, key: str, default_value: str) -> str:
+    row = conn.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
+    if not row:
+        return default_value
+    value = str(row["value"] or "").strip()
+    return value or default_value
+
+
+def get_dashboard_branding(conn: sqlite3.Connection) -> dict[str, str]:
+    return {
+        "dashboard_title": get_site_setting(conn, "dashboard_title", DEFAULT_DASHBOARD_TITLE),
+        "dashboard_subtitle": get_site_setting(conn, "dashboard_subtitle", DEFAULT_DASHBOARD_SUBTITLE),
+    }
+
+
 def user_public(user_row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": user_row["id"],
@@ -616,6 +672,7 @@ def user_public(user_row: sqlite3.Row) -> dict[str, Any]:
         "is_admin": bool(user_row["is_admin"]),
         "auth_provider": user_row["auth_provider"],
         "email": user_row["email"],
+        "theme_color": (user_row["theme_color"] or "#0f6d66"),
         "created_at": user_row["created_at"],
     }
 
@@ -902,6 +959,25 @@ class AdminUserUpdate(BaseModel):
     is_admin: bool | None = None
 
 
+class AdminDashboardBrandingUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    dashboard_title: str | None = Field(default=None, min_length=2, max_length=120)
+    dashboard_subtitle: str | None = Field(default=None, min_length=2, max_length=300)
+
+
+class UserSettingsProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    display_name: str | None = Field(default=None, min_length=2, max_length=60)
+    email: str | None = Field(default=None, max_length=120)
+    theme_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class UserSettingsPasswordUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=6, max_length=128)
+
+
 class ProjectCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=2, max_length=100)
@@ -1137,6 +1213,78 @@ def me(
     return current_user
 
 
+@app.get("/api/auth/settings")
+def auth_settings(current_user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id=?", (current_user["id"],)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {"user": user_public(row)}
+
+
+@app.patch("/api/auth/settings/profile")
+def update_auth_profile(
+    payload: UserSettingsProfileUpdate,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update.")
+
+    sql_updates: dict[str, Any] = {}
+    if "display_name" in updates:
+        display_name = str(updates["display_name"]).strip()
+        if len(display_name) < 2:
+            raise HTTPException(status_code=400, detail="Display name must be at least 2 characters.")
+        sql_updates["display_name"] = display_name
+    if "email" in updates:
+        email = str(updates["email"]).strip()
+        if email and not re.fullmatch(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            raise HTTPException(status_code=400, detail="Invalid email format.")
+        sql_updates["email"] = email or None
+    if "theme_color" in updates:
+        sql_updates["theme_color"] = str(updates["theme_color"]).strip().lower()
+
+    if not sql_updates:
+        raise HTTPException(status_code=400, detail="No fields to update.")
+
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id=?", (current_user["id"],)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        set_clause = ", ".join([f"{k}=?" for k in sql_updates.keys()])
+        values = list(sql_updates.values()) + [current_user["id"]]
+        conn.execute(f"UPDATE users SET {set_clause} WHERE id=?", values)
+        conn.commit()
+        updated = conn.execute("SELECT * FROM users WHERE id=?", (current_user["id"],)).fetchone()
+    return {"user": user_public(updated)}
+
+
+@app.patch("/api/auth/settings/password")
+def update_auth_password(
+    payload: UserSettingsPasswordUpdate,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, bool]:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id=?", (current_user["id"],)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if str(row["auth_provider"] or "local") != "local":
+            raise HTTPException(status_code=400, detail="Password change is not supported for this account.")
+        if not verify_password(payload.current_password, str(row["password_hash"])):
+            raise HTTPException(status_code=400, detail="Current password is incorrect.")
+        if verify_password(payload.new_password, str(row["password_hash"])):
+            raise HTTPException(status_code=400, detail="New password must be different from current password.")
+
+        conn.execute(
+            "UPDATE users SET password_hash=? WHERE id=?",
+            (hash_password(payload.new_password), current_user["id"]),
+        )
+        conn.commit()
+    return {"ok": True}
+
+
 @app.get("/api/users/exists/{username}")
 def user_exists(username: str, _: dict[str, Any] = Depends(get_current_user)) -> dict[str, bool]:
     with get_db() as conn:
@@ -1236,6 +1384,58 @@ def admin_delete_user(
             raise HTTPException(status_code=404, detail="User not found.")
         conn.commit()
     return {"ok": True}
+
+
+@app.get("/api/site-branding")
+def get_site_branding(_: dict[str, Any] = Depends(get_current_user)) -> dict[str, str]:
+    with get_db() as conn:
+        return get_dashboard_branding(conn)
+
+
+@app.get("/api/admin/site-branding")
+def admin_get_site_branding(_: dict[str, Any] = Depends(get_admin_user)) -> dict[str, str]:
+    with get_db() as conn:
+        return get_dashboard_branding(conn)
+
+
+@app.patch("/api/admin/site-branding")
+def admin_update_site_branding(
+    payload: AdminDashboardBrandingUpdate,
+    _: dict[str, Any] = Depends(get_admin_user),
+) -> dict[str, str]:
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update.")
+
+    mapped = {
+        "dashboard_title": str(updates["dashboard_title"]).strip()
+        if "dashboard_title" in updates
+        else None,
+        "dashboard_subtitle": str(updates["dashboard_subtitle"]).strip()
+        if "dashboard_subtitle" in updates
+        else None,
+    }
+    if "dashboard_title" in updates and not mapped["dashboard_title"]:
+        raise HTTPException(status_code=400, detail="Dashboard title cannot be empty.")
+    if "dashboard_subtitle" in updates and not mapped["dashboard_subtitle"]:
+        raise HTTPException(status_code=400, detail="Dashboard subtitle cannot be empty.")
+
+    with get_db() as conn:
+        for key, value in mapped.items():
+            if value is None:
+                continue
+            conn.execute(
+                """
+                INSERT INTO app_settings (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value=excluded.value,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (key, value),
+            )
+        conn.commit()
+        return get_dashboard_branding(conn)
 
 
 @app.get("/api/dashboard")

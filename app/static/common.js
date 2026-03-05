@@ -32,6 +32,51 @@
     return String(error?.message || "요청 처리 중 오류가 발생했습니다.");
   }
 
+  function normalizeThemeColor(value) {
+    const raw = String(value || "").trim();
+    if (!/^#[0-9a-fA-F]{6}$/.test(raw)) return "#0f6d66";
+    return raw.toLowerCase();
+  }
+
+  function hexToRgb(hex) {
+    const normalized = normalizeThemeColor(hex).slice(1);
+    return {
+      r: parseInt(normalized.slice(0, 2), 16),
+      g: parseInt(normalized.slice(2, 4), 16),
+      b: parseInt(normalized.slice(4, 6), 16),
+    };
+  }
+
+  function rgbToHex(r, g, b) {
+    const toHex = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+  }
+
+  function mixColor(baseHex, targetHex, ratio) {
+    const base = hexToRgb(baseHex);
+    const target = hexToRgb(targetHex);
+    const p = Math.max(0, Math.min(1, Number(ratio) || 0));
+    return rgbToHex(
+      base.r + (target.r - base.r) * p,
+      base.g + (target.g - base.g) * p,
+      base.b + (target.b - base.b) * p
+    );
+  }
+
+  function applyThemeColor(color) {
+    const root = document.documentElement;
+    const accent = normalizeThemeColor(color);
+    root.style.setProperty("--accent", accent);
+    root.style.setProperty("--accent-soft", mixColor(accent, "#ffffff", 0.84));
+    root.style.setProperty("--hero-from", mixColor(accent, "#000000", 0.18));
+    root.style.setProperty("--hero-to", mixColor(accent, "#000000", 0.06));
+    return accent;
+  }
+
+  function applyUserTheme(user) {
+    return applyThemeColor(user?.theme_color || "#0f6d66");
+  }
+
   function createApiClient(options = {}) {
     const {
       loginPath = "/static/login.html",
@@ -97,9 +142,12 @@
   }
 
   global.PMCommon = {
+    applyThemeColor,
+    applyUserTheme,
     createApiClient,
     escapeHtml,
     getCookie,
+    normalizeThemeColor,
     parseApiError,
     withCsrfHeader,
   };

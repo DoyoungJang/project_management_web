@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>내 설정</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero__inner">
+        <div class="topbar">
+          <div class="actions">
+            <a class="btn-link" href="/">프로젝트 목록</a>
+          </div>
+          <div class="actions">
+            <a class="btn-link" href="/static/template.html">템플릿</a>
+            <a id="admin-link" class="btn-link hidden" href="/static/admin.html">Admin</a>
+            <button id="logout-btn" type="button">로그아웃</button>
+          </div>
+        </div>
+        <h1>내 설정</h1>
+        <p id="user-info">사용자 설정을 불러오는 중...</p>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel">
+        <h2>페이지 테마 색상</h2>
+        <p class="item__meta">색상을 고른 뒤 저장하면 내 계정 화면에 동일하게 적용됩니다.</p>
+        <form id="theme-form" class="settings-grid">
+          <div class="settings-theme-picker">
+            <label for="theme-color-input">색상 선택</label>
+            <div class="settings-color-row">
+              <input id="theme-color-input" type="color" value="#0f6d66" />
+              <input id="theme-color-text" type="text" value="#0f6d66" maxlength="7" placeholder="#0f6d66" />
+              <span id="theme-color-chip" class="theme-color-chip" aria-hidden="true"></span>
+              <button id="theme-reset-btn" type="button">기본색</button>
+            </div>
+            <div id="theme-presets" class="theme-presets">
+              <button type="button" data-theme-preset="#0f6d66" style="--preset:#0f6d66">기본</button>
+              <button type="button" data-theme-preset="#005f73" style="--preset:#005f73">딥 틸</button>
+              <button type="button" data-theme-preset="#2a6f97" style="--preset:#2a6f97">블루</button>
+              <button type="button" data-theme-preset="#3b7a57" style="--preset:#3b7a57">그린</button>
+              <button type="button" data-theme-preset="#9b2226" style="--preset:#9b2226">레드</button>
+              <button type="button" data-theme-preset="#6a4c93" style="--preset:#6a4c93">퍼플</button>
+            </div>
+            <div class="item__meta">현재 선택 색상: <strong id="theme-color-value">#0f6d66</strong></div>
+          </div>
+
+          <div id="theme-preview" class="theme-preview">
+            <div class="theme-preview__hero">헤더/강조 색상 미리보기</div>
+            <div class="theme-preview__panel">
+              <span class="badge">Badge</span>
+              <button type="button">Button</button>
+            </div>
+          </div>
+
+          <button type="submit">테마 저장</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>기본 정보</h2>
+        <p class="item__meta">이름/이메일을 수정할 수 있습니다.</p>
+        <form id="profile-form" class="form-grid">
+          <input id="profile-username" type="text" readonly />
+          <input id="profile-display-name" name="display_name" type="text" minlength="2" maxlength="60" required />
+          <input id="profile-email" name="email" type="email" maxlength="120" placeholder="email@company.local" />
+          <button type="submit">정보 저장</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>비밀번호 변경</h2>
+        <p class="item__meta">현재 비밀번호 확인 후 새 비밀번호로 변경합니다.</p>
+        <form id="password-form" class="form-grid">
+          <input id="current-password" name="current_password" type="password" placeholder="현재 비밀번호" required />
+          <input id="new-password" name="new_password" type="password" placeholder="새 비밀번호 (6자 이상)" minlength="6" required />
+          <input
+            id="new-password-confirm"
+            name="new_password_confirm"
+            type="password"
+            placeholder="새 비밀번호 확인"
+            minlength="6"
+            required
+          />
+          <button type="submit">비밀번호 변경</button>
+        </form>
+      </section>
+    </main>
+
+    <script src="/static/common.js?v=20260305_1"></script>
+    <script src="/static/settings.js?v=20260305_2"></script>
+  </body>
+</html>

@@ -27,7 +27,7 @@ const els = {
   logoutBtn: document.getElementById("logout-btn"),
 };
 
-const { createApiClient, escapeHtml, parseApiError } = window.PMCommon;
+const { createApiClient, escapeHtml, parseApiError, applyUserTheme } = window.PMCommon;
 const api = createApiClient();
 
 let templates = [];
@@ -425,6 +425,7 @@ async function handleRestoreTemplates() {
 
 async function loadSession() {
   const me = await api.get("/api/auth/me");
+  applyUserTheme(me);
   if (me.is_admin) els.adminLink.classList.remove("hidden");
 }
 

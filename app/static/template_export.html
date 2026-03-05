@@ -12,12 +12,13 @@
         <div class="topbar">
           <a class="btn-link" href="/static/template.html">템플릿 관리로 돌아가기</a>
           <div class="actions">
+            <a class="btn-link" href="/static/settings.html">내 설정</a>
             <a id="admin-link" class="btn-link hidden" href="/static/admin.html">Admin</a>
             <button id="logout-btn" type="button">로그아웃</button>
           </div>
         </div>
         <h1>선택 템플릿 백업</h1>
-        <p>백업할 템플릿을 선택한 뒤 JSON 파일로 다운로드하세요.</p>
+        <p>백업할 템플릿을 선택하고 JSON 파일로 내려받습니다.</p>
       </div>
     </header>
 
@@ -36,14 +37,14 @@
             전체 선택
           </label>
           <span id="selected-count" class="item__meta">0개 선택</span>
-          <button id="export-selected-btn" type="button" disabled>선택한 템플릿 백업</button>
+          <button id="export-selected-btn" type="button" disabled>선택 템플릿 백업</button>
         </div>
 
         <div id="template-export-list" class="list" style="margin-top: 10px"></div>
       </section>
     </main>
 
-    <script src="/static/common.js?v=20260301_2"></script>
-    <script src="/static/template_export.js?v=20260304_1"></script>
+    <script src="/static/common.js?v=20260305_1"></script>
+    <script src="/static/template_export.js?v=20260305_1"></script>
   </body>
 </html>

@@ -1,4 +1,4 @@
-const { createApiClient, escapeHtml, parseApiError } = window.PMCommon;
+const { createApiClient, escapeHtml, parseApiError, applyUserTheme } = window.PMCommon;
 
 function normalizeText(value) {
   return String(value || "").toLowerCase();
@@ -25,6 +25,9 @@ function setOverflowControls({ controls, info, toggle, total, shown, showAll, un
 const api = createApiClient();
 
 const els = {
+  brandingForm: document.getElementById("site-branding-form"),
+  dashboardTitleInput: document.getElementById("dashboard-title-input"),
+  dashboardSubtitleInput: document.getElementById("dashboard-subtitle-input"),
   createForm: document.getElementById("create-user-form"),
   usersList: document.getElementById("users-list"),
   userFilterInput: document.getElementById("user-filter-input"),
@@ -51,6 +54,7 @@ const LIMITS = {
 
 const state = {
   currentUser: null,
+  branding: null,
   users: [],
   projects: [],
   participantsByProject: new Map(),
@@ -242,10 +246,21 @@ function setPanelsOpen(container, selector, open) {
 
 async function loadSession() {
   state.currentUser = await api.get("/api/auth/me");
+  applyUserTheme(state.currentUser);
   if (!state.currentUser.is_admin) {
     alert("관리자 권한이 필요합니다.");
     window.location.href = "/";
     throw new Error("Not admin");
+  }
+}
+
+async function loadBranding() {
+  state.branding = await api.get("/api/admin/site-branding");
+  if (els.dashboardTitleInput) {
+    els.dashboardTitleInput.value = state.branding.dashboard_title || "";
+  }
+  if (els.dashboardSubtitleInput) {
+    els.dashboardSubtitleInput.value = state.branding.dashboard_subtitle || "";
   }
 }
 
@@ -276,7 +291,7 @@ async function loadProjects() {
 }
 
 async function refreshAll() {
-  await Promise.all([loadUsers(), loadProjects()]);
+  await Promise.all([loadBranding(), loadUsers(), loadProjects()]);
 }
 
 async function handleCreateUser(event) {
@@ -312,6 +327,29 @@ async function handleCreateUser(event) {
     await api.post("/api/admin/users", payload);
     els.createForm.reset();
     await loadUsers();
+  } catch (error) {
+    alert(parseApiError(error));
+  }
+}
+
+async function handleBrandingSave(event) {
+  event.preventDefault();
+  const dashboardTitle = String(els.dashboardTitleInput?.value || "").trim();
+  const dashboardSubtitle = String(els.dashboardSubtitleInput?.value || "").trim();
+  if (!dashboardTitle || !dashboardSubtitle) {
+    alert("제목과 설명을 모두 입력해 주세요.");
+    return;
+  }
+
+  try {
+    const updated = await api.patch("/api/admin/site-branding", {
+      dashboard_title: dashboardTitle,
+      dashboard_subtitle: dashboardSubtitle,
+    });
+    state.branding = updated;
+    if (els.dashboardTitleInput) els.dashboardTitleInput.value = updated.dashboard_title || "";
+    if (els.dashboardSubtitleInput) els.dashboardSubtitleInput.value = updated.dashboard_subtitle || "";
+    alert("대시보드 문구를 저장했습니다.");
   } catch (error) {
     alert(parseApiError(error));
   }
@@ -487,6 +525,7 @@ els.projectsOverflowToggle?.addEventListener("click", () => {
 });
 
 els.createForm?.addEventListener("submit", handleCreateUser);
+els.brandingForm?.addEventListener("submit", handleBrandingSave);
 els.usersList?.addEventListener("click", handleUsersListClick);
 els.projectsList?.addEventListener("click", handleProjectsListClick);
 
