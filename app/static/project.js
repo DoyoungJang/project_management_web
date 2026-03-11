@@ -44,12 +44,28 @@ let participants = [];
 let projectStages = [];
 let draggingChecklistId = null;
 let currentUser = null;
+let editingChecklistId = null;
 
 function stageLabel(stage) {
   const foundDynamic = projectStages.find((x) => x.stage_key === stage);
   if (foundDynamic) return foundDynamic.stage_name;
   const foundFallback = STAGES.find((x) => x.key === stage);
   return foundFallback ? foundFallback.title : stage;
+}
+
+function workflowStatusLabel(status) {
+  const map = {
+    upcoming: "Upcoming",
+    inprogress: "In Progress",
+    done: "Done",
+  };
+  return map[status] || status || "Upcoming";
+}
+
+function descriptionPreview(value) {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "설명 없음";
+  return normalized.length > 80 ? `${normalized.slice(0, 80)}...` : normalized;
 }
 
 async function loadSession() {
@@ -201,30 +217,78 @@ function renderStages() {
 }
 
 function renderStage(stage) {
-  const items = checklistItems.filter((x) => x.stage === stage.stage_key);
+  const items = checklistItems
+    .filter((x) => x.stage === stage.stage_key)
+    .sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
   const listHtml =
     items.length === 0
       ? "<div class='item__meta'>작업 항목이 없습니다.</div>"
       : items
-          .map(
-            (item) => `
-            <div class="check-item">
-              <input type="checkbox" data-toggle-item="${item.id}" ${item.is_done ? "checked" : ""} />
-              <span class="${item.is_done ? "check-done" : ""}">
-                <small class="item__meta">${item.target_date ? `목표일: ${escapeHtml(item.target_date)}` : ""}</small>
-              </span>
-              <button type="button" class="danger check-del" data-del-item="${item.id}">삭제</button>
+          .map((item) => {
+            if (editingChecklistId === Number(item.id)) {
+              return `
+            <form class="template-item-editor project-item-editor" data-edit-checklist-form="${item.id}">
+              <input
+                name="content"
+                value="${escapeHtml(item.content)}"
+                placeholder="작업 항목 입력"
+                required
+                minlength="1"
+                maxlength="200"
+              />
+              <textarea
+                name="description"
+                placeholder="설명 팝업 내용 입력"
+                maxlength="5000"
+              >${escapeHtml(item.description || "")}</textarea>
+              <div class="project-item-editor__grid">
+                <label class="project-item-editor__field">
+                  <span class="item__meta">목표일</span>
+                  <input name="target_date" type="date" value="${item.target_date || ""}" />
+                </label>
+                <label class="project-item-editor__field">
+                  <span class="item__meta">상태</span>
+                  <select name="workflow_status">
+                    <option value="upcoming" ${item.workflow_status === "upcoming" ? "selected" : ""}>Upcoming</option>
+                    <option value="inprogress" ${item.workflow_status === "inprogress" ? "selected" : ""}>In Progress</option>
+                    <option value="done" ${item.workflow_status === "done" ? "selected" : ""}>Done</option>
+                  </select>
+                </label>
+                <label class="inline-check project-item-editor__check">
+                  <input type="checkbox" name="is_done" value="1" ${item.is_done ? "checked" : ""} />
+                  완료
+                </label>
+              </div>
+              <div class="actions">
+                <button type="submit">저장</button>
+                <button type="button" data-cancel-edit-checklist="${item.id}">취소</button>
+              </div>
+            </form>
+          `;
+            }
+
+            return `
+            <div class="template-item-card project-item-card ${item.is_done ? "project-item-card--done" : ""}">
+              <label class="inline-check project-item-card__toggle">
+                <input type="checkbox" data-toggle-item="${item.id}" ${item.is_done ? "checked" : ""} />
+                완료
+              </label>
+              <div class="template-item-card__body">
+                <strong class="${item.is_done ? "check-done" : ""}">${escapeHtml(item.content)}</strong>
+                <div class="item__meta">${escapeHtml(descriptionPreview(item.description || ""))}</div>
+                <div class="item__meta">
+                  목표일: ${escapeHtml(item.target_date || "-")} | 상태: ${escapeHtml(
+                    workflowStatusLabel(item.workflow_status || "upcoming")
+                  )}
+                </div>
+              </div>
+              <div class="actions">
+                <button type="button" data-edit-checklist="${item.id}">수정</button>
+                <button type="button" class="danger check-del" data-del-item="${item.id}">삭제</button>
+              </div>
             </div>
-            <div class="text-edit">
-              <input type="text" data-content-list="${item.id}" value="${escapeHtml(item.content)}" maxlength="200" />
-              <button type="button" data-save-content-list="${item.id}">내용 저장</button>
-            </div>
-            <div class="date-edit">
-              <input type="date" data-date-list="${item.id}" value="${item.target_date || ""}" />
-              <button type="button" data-save-date-list="${item.id}">일정 저장</button>
-            </div>
-          `
-          )
+          `;
+          })
           .join("");
 
   return `
@@ -234,81 +298,27 @@ function renderStage(stage) {
         <span class="badge">${items.length}개</span>
       </div>
       <div class="check-list">${listHtml}</div>
-      <form class="check-form with-date work-check-form" data-stage-form="${stage.stage_key}">
+      <form class="check-form work-check-form project-item-create-form" data-stage-form="${stage.stage_key}">
         <input name="content" placeholder="작업 항목 입력" required minlength="1" maxlength="200" />
-        <input name="target_date" type="date" />
-        <select name="workflow_status">
-          <option value="upcoming">Upcoming</option>
-          <option value="inprogress">In Progress</option>
-          <option value="done">Done</option>
-        </select>
+        <textarea name="description" placeholder="설명 팝업 내용 입력" maxlength="5000"></textarea>
+        <div class="project-item-editor__grid">
+          <label class="project-item-editor__field">
+            <span class="item__meta">목표일</span>
+            <input name="target_date" type="date" />
+          </label>
+          <label class="project-item-editor__field">
+            <span class="item__meta">상태</span>
+            <select name="workflow_status">
+              <option value="upcoming">Upcoming</option>
+              <option value="inprogress">In Progress</option>
+              <option value="done">Done</option>
+            </select>
+          </label>
+        </div>
         <button type="submit">추가</button>
       </form>
     </article>
   `;
-}
-
-function mountChecklistContentEditors() {
-  if (els.board) {
-    els.board.querySelectorAll("[data-content-board]").forEach((input) => {
-      const id = input.getAttribute("data-content-board");
-      const editWrap = input.closest(".text-edit");
-      if (!editWrap) return;
-      editWrap.classList.add("hidden");
-
-      const textView = document.createElement("div");
-      textView.setAttribute("data-content-text-board", id);
-      textView.textContent = input.value || "";
-
-      const editBtnWrap = document.createElement("div");
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.textContent = "Edit";
-      editBtn.setAttribute("data-edit-content-board", id);
-      editBtnWrap.appendChild(editBtn);
-
-      const cancelBtn = document.createElement("button");
-      cancelBtn.type = "button";
-      cancelBtn.textContent = "Cancel";
-      cancelBtn.setAttribute("data-cancel-content-board", id);
-      editWrap.appendChild(cancelBtn);
-
-      editWrap.parentNode.insertBefore(textView, editWrap);
-      editWrap.parentNode.insertBefore(editBtnWrap, editWrap);
-    });
-  }
-
-  if (els.stages) {
-    els.stages.querySelectorAll("[data-content-list]").forEach((input) => {
-      const id = input.getAttribute("data-content-list");
-      const editWrap = input.closest(".text-edit");
-      if (!editWrap) return;
-      editWrap.classList.add("hidden");
-
-      const textView = document.createElement("div");
-      textView.setAttribute("data-content-text-list", id);
-      textView.textContent = input.value || "";
-
-      const toggle = els.stages.querySelector(`[data-toggle-item="${id}"]`);
-      if (toggle && toggle.checked) textView.classList.add("check-done");
-
-      const editBtnWrap = document.createElement("div");
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.textContent = "Edit";
-      editBtn.setAttribute("data-edit-content-list", id);
-      editBtnWrap.appendChild(editBtn);
-
-      const cancelBtn = document.createElement("button");
-      cancelBtn.type = "button";
-      cancelBtn.textContent = "Cancel";
-      cancelBtn.setAttribute("data-cancel-content-list", id);
-      editWrap.appendChild(cancelBtn);
-
-      editWrap.parentNode.insertBefore(textView, editWrap);
-      editWrap.parentNode.insertBefore(editBtnWrap, editWrap);
-    });
-  }
 }
 
 function bindBoardDragEvents() {
@@ -363,7 +373,6 @@ async function loadChecklist() {
   checklistItems = await api.get(`/api/projects/${projectId}/checklists`);
   if (els.board) renderBoard();
   if (els.stages) renderStages();
-  mountChecklistContentEditors();
   if (els.board) bindBoardDragEvents();
 }
 
@@ -507,6 +516,30 @@ els.applyTemplateBtn.addEventListener("click", async () => {
 });
 
 els.stages?.addEventListener("submit", async (e) => {
+  const editForm = e.target.closest("[data-edit-checklist-form]");
+  if (editForm) {
+    e.preventDefault();
+    const itemId = Number(editForm.getAttribute("data-edit-checklist-form"));
+    const payload = Object.fromEntries(new FormData(editForm).entries());
+    const content = String(payload.content || "").trim();
+    if (!content) {
+      alert("작업 항목 내용을 입력해 주세요.");
+      editForm.querySelector("[name='content']")?.focus();
+      return;
+    }
+
+    await api.patch(`/api/checklists/${itemId}`, {
+      content,
+      description: String(payload.description || "").trim(),
+      target_date: payload.target_date || null,
+      workflow_status: payload.workflow_status || "upcoming",
+      is_done: Boolean(payload.is_done),
+    });
+    editingChecklistId = null;
+    await loadChecklist();
+    return;
+  }
+
   const form = e.target.closest("[data-stage-form]");
   if (!form) return;
   e.preventDefault();
@@ -514,11 +547,18 @@ els.stages?.addEventListener("submit", async (e) => {
   const stage = form.getAttribute("data-stage-form");
   const body = {
     stage,
-    content: payload.content,
+    content: String(payload.content || "").trim(),
+    description: String(payload.description || "").trim(),
     target_date: payload.target_date || null,
     workflow_status: payload.workflow_status || "upcoming",
   };
+  if (!body.content) {
+    alert("작업 항목 내용을 입력해 주세요.");
+    form.querySelector("[name='content']")?.focus();
+    return;
+  }
   await api.post(`/api/projects/${projectId}/checklists`, body);
+  editingChecklistId = null;
   form.reset();
   await loadChecklist();
 });
@@ -532,45 +572,16 @@ els.stages?.addEventListener("change", async (e) => {
 });
 
 els.stages?.addEventListener("click", async (e) => {
-  const editContentBtn = e.target.closest("[data-edit-content-list]");
-  if (editContentBtn) {
-    const id = editContentBtn.getAttribute("data-edit-content-list");
-    const wrap = els.stages.querySelector(`[data-content-list="${id}"]`)?.closest(".text-edit");
-    if (wrap) wrap.classList.remove("hidden");
-    return;
-  }
-
-  const cancelContentBtn = e.target.closest("[data-cancel-content-list]");
-  if (cancelContentBtn) {
-    const id = cancelContentBtn.getAttribute("data-cancel-content-list");
-    const wrap = els.stages.querySelector(`[data-content-list="${id}"]`)?.closest(".text-edit");
-    const text = els.stages.querySelector(`[data-content-text-list="${id}"]`);
-    const input = els.stages.querySelector(`[data-content-list="${id}"]`);
-    if (input && text) input.value = (text.textContent || "").trim();
-    if (wrap) wrap.classList.add("hidden");
-    return;
-  }
-
-  const saveContentBtn = e.target.closest("[data-save-content-list]");
-  if (saveContentBtn) {
-    const id = saveContentBtn.getAttribute("data-save-content-list");
-    const input = els.stages.querySelector(`[data-content-list="${id}"]`);
-    const content = (input.value || "").trim();
-    if (!content) {
-      alert("작업 항목 내용을 입력해 주세요.");
-      input.focus();
-      return;
-    }
-    await api.patch(`/api/checklists/${id}`, { content });
+  const editBtn = e.target.closest("[data-edit-checklist]");
+  if (editBtn) {
+    editingChecklistId = Number(editBtn.getAttribute("data-edit-checklist"));
     await loadChecklist();
     return;
   }
 
-  const saveDateBtn = e.target.closest("[data-save-date-list]");
-  if (saveDateBtn) {
-    const id = saveDateBtn.getAttribute("data-save-date-list");
-    const input = els.stages.querySelector(`[data-date-list="${id}"]`);
-    await api.patch(`/api/checklists/${id}`, { target_date: input.value || null });
+  const cancelBtn = e.target.closest("[data-cancel-edit-checklist]");
+  if (cancelBtn) {
+    editingChecklistId = null;
     await loadChecklist();
     return;
   }
@@ -579,6 +590,7 @@ els.stages?.addEventListener("click", async (e) => {
   if (!btn) return;
   const itemId = btn.getAttribute("data-del-item");
   if (!confirm("작업 항목을 삭제할까요?")) return;
+  editingChecklistId = null;
   await api.del(`/api/checklists/${itemId}`);
   await loadChecklist();
 });

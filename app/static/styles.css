@@ -740,6 +740,41 @@ button:active {
   min-height: 120px;
 }
 
+.project-item-card {
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+}
+
+.project-item-card--done {
+  background: #f7fafb;
+}
+
+.project-item-card__toggle {
+  white-space: nowrap;
+  align-self: center;
+}
+
+.project-item-editor__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.project-item-editor__field {
+  display: grid;
+  gap: 4px;
+}
+
+.project-item-editor__check {
+  min-height: 42px;
+  align-self: end;
+}
+
+.project-item-create-form {
+  gap: 10px;
+}
+
 .text-edit,
 .date-edit {
   display: grid;
