@@ -1,4 +1,4 @@
-const { createApiClient, escapeHtml, parseApiError, applyUserTheme } = window.PMCommon;
+const { createApiClient, escapeHtml, parseApiError, applyUserTheme, showTaskDescriptionModal } = window.PMCommon;
 const api = createApiClient();
 
 const els = {
@@ -111,7 +111,13 @@ function renderUpcomingItems(items) {
             <span class="badge">D-${x.days_left}</span>
           </div>
         </div>
-        <div>${escapeHtml(x.content)}</div>
+        <button
+          type="button"
+          class="task-detail-trigger task-detail-trigger--list"
+          data-open-upcoming-description="${x.checklist_id}"
+        >
+          ${escapeHtml(x.content)}
+        </button>
         <div class="item__meta">단계: ${escapeHtml(stageLabel(x.stage))} | 목표일: ${escapeHtml(x.target_date || "-")}</div>
         <div class="actions">
           <button
@@ -267,6 +273,22 @@ els.projectList?.addEventListener("click", async (e) => {
 });
 
 els.todayNotifications?.addEventListener("click", (e) => {
+  const detailBtn = e.target.closest("[data-open-upcoming-description]");
+  if (detailBtn) {
+    const checklistId = Number(detailBtn.getAttribute("data-open-upcoming-description"));
+    const item = upcomingItems.find((x) => Number(x.checklist_id) === checklistId);
+    if (!item) return;
+
+    showTaskDescriptionModal({
+      title: item.content || "작업 설명",
+      description: item.description || "",
+      projectName: item.project_name || "",
+      stageName: stageLabel(item.stage),
+      targetDate: item.target_date || "",
+    });
+    return;
+  }
+
   const btn = e.target.closest("[data-open-upcoming-project]");
   if (!btn) return;
 

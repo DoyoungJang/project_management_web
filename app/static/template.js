@@ -36,6 +36,7 @@ let selectedTemplateStages = [];
 let selectedTemplateItems = [];
 let selectedForBulkDelete = new Set();
 let isDirty = false;
+let editingTemplateItemKey = null;
 
 function markDirty() {
   isDirty = true;
@@ -43,6 +44,16 @@ function markDirty() {
 
 function clearDirty() {
   isDirty = false;
+}
+
+function buildTemplateItemKey(stageKey, position) {
+  return `${String(stageKey || "").trim()}::${Number(position || 0)}`;
+}
+
+function descriptionPreview(value) {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "설명 없음";
+  return normalized.length > 80 ? `${normalized.slice(0, 80)}...` : normalized;
 }
 
 function normalizeStageKey(name) {
@@ -166,6 +177,7 @@ function normalizeTemplateItems(items, stages) {
     grouped.get(stage).push({
       stage,
       content,
+      description: String(item.description || "").trim(),
       position: Number.isFinite(Number(item.position)) ? Number(item.position) : 0,
     });
   }
@@ -183,6 +195,7 @@ function normalizeTemplateItems(items, stages) {
       out.push({
         stage: row.stage,
         content: row.content,
+        description: row.description || "",
         position: idx,
       });
     });
@@ -524,19 +537,47 @@ function renderStage(stage) {
     items.length === 0
       ? "<div class='item__meta'>작업 항목이 없습니다.</div>"
       : items
-          .map(
-            (item) => `
-          <div class="check-item read-only">
-            <span>${escapeHtml(item.content)}</span>
+          .map((item) => {
+            const itemKey = buildTemplateItemKey(stage.stage_key, item.position);
+            const isEditing = editingTemplateItemKey === itemKey;
+            if (isEditing) {
+              return `
+          <form class="template-item-editor" data-edit-item-form="${itemKey}">
+            <input
+              name="content"
+              value="${escapeHtml(item.content)}"
+              placeholder="\uC791\uC5C5 \uD56D\uBAA9 \uC785\uB825"
+              required
+              minlength="1"
+              maxlength="200"
+            />
+            <textarea
+              name="description"
+              placeholder="\uC124\uBA85 \uD31D\uC5C5 \uB0B4\uC6A9 \uC785\uB825 (URL\uC740 \uD31D\uC5C5\uC5D0\uC11C \uC790\uB3D9 \uB9C1\uD06C \uCC98\uB9AC\uB429\uB2C8\uB2E4)"
+              maxlength="5000"
+            >${escapeHtml(item.description || "")}</textarea>
             <div class="actions">
-              <button type="button" data-edit-item="${stage.stage_key}::${item.position}">이름 변경</button>
+              <button type="submit">\uC800\uC7A5</button>
+              <button type="button" data-cancel-edit-item="${itemKey}">\uCDE8\uC18C</button>
+            </div>
+          </form>
+        `;
+            }
+            return `
+          <div class="template-item-card">
+            <div class="template-item-card__body">
+              <strong>${escapeHtml(item.content)}</strong>
+              <div class="item__meta">${escapeHtml(descriptionPreview(item.description || ""))}</div>
+            </div>
+            <div class="actions">
+              <button type="button" data-edit-item="${itemKey}">\uC218\uC815</button>
               <button type="button" class="danger check-del" data-del-item="${item.position}" data-del-stage="${
                 stage.stage_key
-              }">삭제</button>
+              }">\uC0AD\uC81C</button>
             </div>
           </div>
-        `
-          )
+        `;
+          })
           .join("");
 
   return `
@@ -547,8 +588,19 @@ function renderStage(stage) {
       </div>
       <div class="check-list">${listHtml}</div>
       <form class="check-form work-check-form" data-stage-form="${stage.stage_key}">
-        <input name="content" placeholder="작업 항목 입력" required minlength="1" maxlength="200" />
-        <button type="submit">추가</button>
+        <input
+          name="content"
+          placeholder="\uC791\uC5C5 \uD56D\uBAA9 \uC785\uB825"
+          required
+          minlength="1"
+          maxlength="200"
+        />
+        <textarea
+          name="description"
+          placeholder="\uC124\uBA85 \uD31D\uC5C5 \uB0B4\uC6A9 \uC785\uB825 (URL\uC740 \uD31D\uC5C5\uC5D0\uC11C \uC790\uB3D9 \uB9C1\uD06C \uCC98\uB9AC\uB429\uB2C8\uB2E4)"
+          maxlength="5000"
+        ></textarea>
+        <button type="submit">\uCD94\uAC00</button>
       </form>
     </article>
   `;
@@ -627,9 +679,11 @@ async function selectTemplate(templateId) {
     id: x.id ?? null,
     stage: String(x.stage || "").trim(),
     content: String(x.content || "").trim(),
+    description: String(x.description || "").trim(),
     position: Number(x.position || 0),
   }));
 
+  editingTemplateItemKey = null;
   clearDirty();
   renderTemplateList();
   refreshTemplateEditorView();
@@ -667,6 +721,7 @@ function buildItemReplacePayload() {
     .map((item) => ({
       stage: item.stage,
       content: String(item.content || "").trim(),
+      description: String(item.description || "").trim(),
       position: Number(item.position || 0),
     }))
     .filter((item) => item.stage && item.content);
@@ -879,6 +934,32 @@ els.stageList?.addEventListener("click", (e) => {
 });
 
 els.stageContainer?.addEventListener("submit", (e) => {
+  const editForm = e.target.closest("[data-edit-item-form]");
+  if (editForm && selectedTemplateId) {
+    e.preventDefault();
+    const itemKey = String(editForm.getAttribute("data-edit-item-form") || "");
+    const [stageKey, posRaw] = itemKey.split("::");
+    const target = selectedTemplateItems.find(
+      (x) => x.stage === stageKey && Number(x.position) === Number(posRaw)
+    );
+    if (!target) return;
+
+    const payload = Object.fromEntries(new FormData(editForm).entries());
+    const content = String(payload.content || "").trim();
+    if (!content) {
+      alert("작업 항목 내용을 입력해 주세요.");
+      editForm.querySelector("[name='content']")?.focus();
+      return;
+    }
+
+    target.content = content;
+    target.description = String(payload.description || "").trim();
+    editingTemplateItemKey = null;
+    markDirty();
+    refreshTemplateEditorView();
+    return;
+  }
+
   const form = e.target.closest("[data-stage-form]");
   if (!form || !selectedTemplateId) return;
   e.preventDefault();
@@ -896,8 +977,10 @@ els.stageContainer?.addEventListener("submit", (e) => {
     id: null,
     stage,
     content,
+    description: String(payload.description || "").trim(),
     position: nextPos,
   });
+  editingTemplateItemKey = null;
   form.reset();
   markDirty();
   refreshTemplateEditorView();
@@ -906,20 +989,14 @@ els.stageContainer?.addEventListener("submit", (e) => {
 els.stageContainer?.addEventListener("click", (e) => {
   const editBtn = e.target.closest("[data-edit-item]");
   if (editBtn) {
-    const raw = String(editBtn.getAttribute("data-edit-item") || "");
-    const [stageKey, posRaw] = raw.split("::");
-    const pos = Number(posRaw);
-    const target = selectedTemplateItems.find((x) => x.stage === stageKey && Number(x.position) === pos);
-    if (!target) return;
-    const nextContent = prompt("변경할 작업 항목 내용을 입력하세요.", target.content || "");
-    if (nextContent === null) return;
-    const trimmed = String(nextContent || "").trim();
-    if (!trimmed) {
-      alert("작업 항목 내용을 입력해 주세요.");
-      return;
-    }
-    target.content = trimmed;
-    markDirty();
+    editingTemplateItemKey = String(editBtn.getAttribute("data-edit-item") || "");
+    refreshTemplateEditorView();
+    return;
+  }
+
+  const cancelEditBtn = e.target.closest("[data-cancel-edit-item]");
+  if (cancelEditBtn) {
+    editingTemplateItemKey = null;
     refreshTemplateEditorView();
     return;
   }
@@ -930,6 +1007,7 @@ els.stageContainer?.addEventListener("click", (e) => {
   const position = Number(deleteBtn.getAttribute("data-del-item"));
   selectedTemplateItems = selectedTemplateItems.filter((x) => !(x.stage === stage && Number(x.position) === position));
   normalizeItemPositionsByStage();
+  editingTemplateItemKey = null;
   markDirty();
   refreshTemplateEditorView();
 });

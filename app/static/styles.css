@@ -624,6 +624,31 @@ button:active {
   margin-bottom: 6px;
 }
 
+.task-detail-trigger {
+  background: transparent;
+  color: var(--ink);
+  border: none;
+  padding: 0;
+  text-align: left;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.task-detail-trigger:hover {
+  opacity: 1;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.task-detail-trigger:active {
+  transform: none;
+}
+
+.task-detail-trigger--card,
+.task-detail-trigger--list {
+  width: 100%;
+}
+
 .stage {
   border: 1px solid #e0e7f1;
   border-radius: 10px;
@@ -687,6 +712,34 @@ button:active {
   padding: 8px;
 }
 
+.work-check-form textarea {
+  min-height: 96px;
+}
+
+.template-item-card,
+.template-item-editor {
+  border: 1px solid #e0e7f1;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.template-item-card {
+  grid-template-columns: 1fr auto;
+  align-items: start;
+}
+
+.template-item-card__body {
+  display: grid;
+  gap: 4px;
+}
+
+.template-item-editor textarea {
+  min-height: 120px;
+}
+
 .text-edit,
 .date-edit {
   display: grid;
@@ -713,6 +766,52 @@ button[data-edit-content-list]:hover,
 button[data-edit-content-board]:hover {
   background: #eef3f9;
   color: #243a50;
+}
+
+.task-desc-dialog {
+  width: min(720px, calc(100vw - 32px));
+  border: none;
+  border-radius: 16px;
+  padding: 0;
+  box-shadow: 0 20px 48px rgba(16, 31, 54, 0.24);
+}
+
+.task-desc-dialog::backdrop {
+  background: rgba(17, 28, 44, 0.48);
+}
+
+.task-desc-dialog__sheet {
+  margin: 0;
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+  background: #fff;
+}
+
+.task-desc-dialog__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.task-desc-dialog__header h3 {
+  margin: 0 0 6px;
+}
+
+.task-desc-dialog__body {
+  border: 1px solid #e0e7f1;
+  border-radius: 12px;
+  padding: 14px;
+  background: #fbfdff;
+  line-height: 1.65;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.task-desc-link {
+  color: var(--accent);
 }
 
 .admin-project-summary {
@@ -816,6 +915,16 @@ details.item[open] > .admin-user-summary {
   .settings-callout {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .task-desc-dialog {
+    width: calc(100vw - 20px);
+  }
+
+  .task-desc-dialog__header,
+  .template-item-card {
+    grid-template-columns: 1fr;
+    display: grid;
   }
 
   .segmented {

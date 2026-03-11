@@ -374,6 +374,7 @@ def init_db() -> None:
                 project_id INTEGER NOT NULL,
                 stage TEXT NOT NULL,
                 content TEXT NOT NULL,
+                description TEXT DEFAULT '',
                 is_done INTEGER NOT NULL DEFAULT 0,
                 workflow_status TEXT NOT NULL DEFAULT 'upcoming'
                     CHECK (workflow_status IN ('upcoming', 'inprogress', 'done')),
@@ -439,6 +440,7 @@ def init_db() -> None:
                 template_id INTEGER NOT NULL,
                 stage TEXT NOT NULL,
                 content TEXT NOT NULL,
+                description TEXT DEFAULT '',
                 position INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (template_id) REFERENCES checklist_templates(id) ON DELETE CASCADE
@@ -453,6 +455,8 @@ def init_db() -> None:
         ensure_column(conn, "user_sessions", "csrf_token", "TEXT")
         ensure_column(conn, "project_checklist_items", "target_date", "TEXT")
         ensure_column(conn, "project_checklist_items", "workflow_status", "TEXT NOT NULL DEFAULT 'upcoming'")
+        ensure_column(conn, "project_checklist_items", "description", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "checklist_template_items", "description", "TEXT NOT NULL DEFAULT ''")
 
         checklist_table_sql_row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='project_checklist_items'"
@@ -468,6 +472,7 @@ def init_db() -> None:
                     project_id INTEGER NOT NULL,
                     stage TEXT NOT NULL,
                     content TEXT NOT NULL,
+                    description TEXT DEFAULT '',
                     is_done INTEGER NOT NULL DEFAULT 0,
                     workflow_status TEXT NOT NULL DEFAULT 'upcoming'
                         CHECK (workflow_status IN ('upcoming', 'inprogress', 'done')),
@@ -478,12 +483,13 @@ def init_db() -> None:
                 );
 
                 INSERT INTO project_checklist_items
-                    (id, project_id, stage, content, is_done, workflow_status, position, target_date, created_at)
+                    (id, project_id, stage, content, description, is_done, workflow_status, position, target_date, created_at)
                 SELECT
                     id,
                     project_id,
                     stage,
                     content,
+                    '',
                     is_done,
                     CASE
                         WHEN workflow_status IS NULL OR workflow_status='' THEN
@@ -514,14 +520,15 @@ def init_db() -> None:
                     template_id INTEGER NOT NULL,
                     stage TEXT NOT NULL,
                     content TEXT NOT NULL,
+                    description TEXT DEFAULT '',
                     position INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (template_id) REFERENCES checklist_templates(id) ON DELETE CASCADE
                 );
 
                 INSERT INTO checklist_template_items
-                    (id, template_id, stage, content, position, created_at)
-                SELECT id, template_id, stage, content, position, created_at
+                    (id, template_id, stage, content, description, position, created_at)
+                SELECT id, template_id, stage, content, '', position, created_at
                 FROM checklist_template_items_legacy;
 
                 DROP TABLE checklist_template_items_legacy;
@@ -1005,6 +1012,7 @@ class ChecklistItemCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     stage: str = Field(min_length=1, max_length=60, pattern=r"^[a-z0-9_]+$")
     content: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=5000)
     target_date: str | None = None
     workflow_status: str = Field(default="upcoming", pattern="^(upcoming|inprogress|done)$")
 
@@ -1013,6 +1021,7 @@ class ChecklistItemUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     stage: str | None = Field(default=None, min_length=1, max_length=60, pattern=r"^[a-z0-9_]+$")
     content: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=5000)
     is_done: bool | None = None
     position: int | None = Field(default=None, ge=0)
     target_date: str | None = None
@@ -1077,12 +1086,14 @@ class TemplateItemCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     stage: str = Field(min_length=1, max_length=60, pattern=r"^[a-z0-9_]+$")
     content: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=5000)
 
 
 class TemplateItemDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
     stage: str = Field(min_length=1, max_length=60, pattern=r"^[a-z0-9_]+$")
     content: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=5000)
     position: int = Field(ge=0)
 
 
@@ -1095,6 +1106,7 @@ class TemplateRestoreItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     stage: str = Field(min_length=1, max_length=60, pattern=r"^[a-z0-9_]+$")
     content: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=5000)
     position: int = Field(ge=0)
 
 
@@ -1917,13 +1929,14 @@ def create_checklist_item(
         cur = conn.execute(
             """
             INSERT INTO project_checklist_items
-                (project_id, stage, content, is_done, workflow_status, position, target_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (project_id, stage, content, description, is_done, workflow_status, position, target_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 project_id,
                 payload.stage,
                 payload.content.strip(),
+                payload.description.strip(),
                 is_done,
                 payload.workflow_status,
                 int(next_pos_row["next_position"]),
@@ -1960,6 +1973,8 @@ def update_checklist_item(
 
         if "content" in updates:
             updates["content"] = str(updates["content"]).strip()
+        if "description" in updates:
+            updates["description"] = str(updates["description"]).strip()
         if "stage" in updates:
             updates["stage"] = str(updates["stage"]).strip()
             ensure_project_stage_exists(conn, int(current["project_id"]), updates["stage"])
@@ -2093,6 +2108,7 @@ def preview_project_notifications(
             SELECT
                 c.id AS checklist_id,
                 c.content,
+                c.description,
                 c.stage,
                 c.target_date,
                 r.id AS rule_id,
@@ -2126,6 +2142,7 @@ def notifications_today(current_user: dict[str, Any] = Depends(get_current_user)
                     p.name AS project_name,
                     c.id AS checklist_id,
                     c.content,
+                    c.description,
                     c.stage,
                     c.target_date,
                     r.days_before
@@ -2146,6 +2163,7 @@ def notifications_today(current_user: dict[str, Any] = Depends(get_current_user)
                     p.name AS project_name,
                     c.id AS checklist_id,
                     c.content,
+                    c.description,
                     c.stage,
                     c.target_date,
                     r.days_before
@@ -2190,6 +2208,7 @@ def my_upcoming_checklists(
                     c.id AS checklist_id,
                     c.stage,
                     c.content,
+                    c.description,
                     c.target_date,
                     CAST(julianday(date(c.target_date)) - julianday(date('now','localtime')) AS INTEGER) AS days_left,
                     'admin' AS membership_type
@@ -2211,6 +2230,7 @@ def my_upcoming_checklists(
                     c.id AS checklist_id,
                     c.stage,
                     c.content,
+                    c.description,
                     c.target_date,
                     CAST(julianday(date(c.target_date)) - julianday(date('now','localtime')) AS INTEGER) AS days_left,
                     CASE WHEN p.owner=? THEN 'owner' ELSE 'participant' END AS membership_type
@@ -2315,6 +2335,7 @@ def build_templates_export_payload(
             i.template_id,
             i.stage,
             i.content,
+            i.description,
             i.position,
             COALESCE(s.position, 999999) AS stage_position
         FROM checklist_template_items i
@@ -2366,6 +2387,7 @@ def build_templates_export_payload(
                     {
                         "stage": stage_key,
                         "content": row["content"],
+                        "description": row["description"] or "",
                         "position": idx,
                     }
                 )
@@ -2472,11 +2494,18 @@ def restore_templates(
             for item in tpl.items:
                 grouped.setdefault(item.stage, []).append(item)
 
-            normalized_items: list[tuple[str, str, int]] = []
+            normalized_items: list[tuple[str, str, str, int]] = []
             for stage_key, _, _ in sorted(stage_defs, key=lambda x: x[2]):
                 items = sorted(grouped.get(stage_key, []), key=lambda x: x.position)
                 for idx, item in enumerate(items):
-                    normalized_items.append((stage_key, item.content.strip(), idx))
+                    normalized_items.append(
+                        (
+                            stage_key,
+                            item.content.strip(),
+                            (item.description or "").strip(),
+                            idx,
+                        )
+                    )
 
             existing = conn.execute(
                 "SELECT id, created_by FROM checklist_templates WHERE name=?",
@@ -2508,13 +2537,13 @@ def restore_templates(
                         """,
                         (template_id, stage_key, stage_name, pos),
                     )
-                for stage, content, pos in normalized_items:
+                for stage, content, item_description, pos in normalized_items:
                     conn.execute(
                         """
-                        INSERT INTO checklist_template_items (template_id, stage, content, position)
-                        VALUES (?, ?, ?, ?)
+                        INSERT INTO checklist_template_items (template_id, stage, content, description, position)
+                        VALUES (?, ?, ?, ?, ?)
                         """,
-                        (template_id, stage, content, pos),
+                        (template_id, stage, content, item_description, pos),
                     )
                 updated += 1
                 continue
@@ -2535,13 +2564,13 @@ def restore_templates(
                     """,
                     (template_id, stage_key, stage_name, pos),
                 )
-            for stage, content, pos in normalized_items:
+            for stage, content, item_description, pos in normalized_items:
                 conn.execute(
                     """
-                    INSERT INTO checklist_template_items (template_id, stage, content, position)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO checklist_template_items (template_id, stage, content, description, position)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
-                    (template_id, stage, content, pos),
+                    (template_id, stage, content, item_description, pos),
                 )
             created += 1
 
@@ -2883,10 +2912,16 @@ def create_template_item(
         ).fetchone()
         cur = conn.execute(
             """
-            INSERT INTO checklist_template_items (template_id, stage, content, position)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO checklist_template_items (template_id, stage, content, description, position)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (template_id, payload.stage, payload.content.strip(), int(next_pos_row["next_position"])),
+            (
+                template_id,
+                payload.stage,
+                payload.content.strip(),
+                payload.description.strip(),
+                int(next_pos_row["next_position"]),
+            ),
         )
         conn.commit()
         row = conn.execute("SELECT * FROM checklist_template_items WHERE id=?", (cur.lastrowid,)).fetchone()
@@ -2941,10 +2976,10 @@ def replace_template_items(
         for item in payload.items:
             conn.execute(
                 """
-                INSERT INTO checklist_template_items (template_id, stage, content, position)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO checklist_template_items (template_id, stage, content, description, position)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (template_id, item.stage, item.content.strip(), item.position),
+                (template_id, item.stage, item.content.strip(), item.description.strip(), item.position),
             )
         conn.commit()
     return {"ok": True}
@@ -2976,7 +3011,7 @@ def apply_template_to_project(
 
         template_items = conn.execute(
             """
-            SELECT i.stage, i.content, i.position
+            SELECT i.stage, i.content, i.description, i.position
             FROM checklist_template_items i
             LEFT JOIN checklist_template_stages s
               ON s.template_id = i.template_id
@@ -3031,10 +3066,10 @@ def apply_template_to_project(
             conn.execute(
                 """
                 INSERT INTO project_checklist_items
-                    (project_id, stage, content, is_done, workflow_status, position, target_date)
-                VALUES (?, ?, ?, 0, 'upcoming', ?, NULL)
+                    (project_id, stage, content, description, is_done, workflow_status, position, target_date)
+                VALUES (?, ?, ?, ?, 0, 'upcoming', ?, NULL)
                 """,
-                (project_id, item["stage"], item["content"], idx),
+                (project_id, item["stage"], item["content"], item["description"] or "", idx),
             )
         conn.commit()
     return {"ok": True}

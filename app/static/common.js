@@ -141,7 +141,124 @@
     };
   }
 
+  function appendLinkedText(container, value) {
+    const text = String(value || "");
+    const pattern = /((?:https?:\/\/|www\.)[^\s<]+)/gi;
+    const matches = text.matchAll(pattern);
+    let lastIndex = 0;
+
+    function appendPlain(target, plain) {
+      const lines = String(plain || "").split("\n");
+      lines.forEach((line, idx) => {
+        if (idx > 0) target.appendChild(document.createElement("br"));
+        if (line) target.appendChild(document.createTextNode(line));
+      });
+    }
+
+    for (const match of matches) {
+      const urlText = match[0];
+      const index = Number(match.index || 0);
+      appendPlain(container, text.slice(lastIndex, index));
+
+      const anchor = document.createElement("a");
+      const href = /^https?:\/\//i.test(urlText) ? urlText : `https://${urlText}`;
+      anchor.href = href;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      anchor.textContent = urlText;
+      anchor.className = "task-desc-link";
+      container.appendChild(anchor);
+
+      lastIndex = index + urlText.length;
+    }
+
+    appendPlain(container, text.slice(lastIndex));
+  }
+
+  let taskDescriptionDialog = null;
+
+  function ensureTaskDescriptionDialog() {
+    if (taskDescriptionDialog) return taskDescriptionDialog;
+
+    const dialog = document.createElement("dialog");
+    dialog.className = "task-desc-dialog";
+    dialog.innerHTML = `
+      <form method="dialog" class="task-desc-dialog__sheet">
+        <div class="task-desc-dialog__header">
+          <div>
+            <h3 id="task-desc-dialog-title">\uC791\uC5C5 \uC124\uBA85</h3>
+            <div id="task-desc-dialog-meta" class="item__meta"></div>
+          </div>
+          <div class="actions">
+            <button id="task-desc-copy-btn" type="button">\uBCF5\uC0AC</button>
+            <button type="submit">\uB2EB\uAE30</button>
+          </div>
+        </div>
+        <div id="task-desc-dialog-body" class="task-desc-dialog__body"></div>
+      </form>
+    `;
+    document.body.appendChild(dialog);
+
+    dialog.addEventListener("click", (e) => {
+      const rect = dialog.getBoundingClientRect();
+      const isOutside =
+        e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom;
+      if (isOutside) dialog.close();
+    });
+
+    const copyBtn = dialog.querySelector("#task-desc-copy-btn");
+    copyBtn?.addEventListener("click", async () => {
+      const raw = String(copyBtn.getAttribute("data-copy-text") || "");
+      try {
+        await navigator.clipboard.writeText(raw);
+        copyBtn.textContent = "\uBCF5\uC0AC\uB428";
+        window.setTimeout(() => {
+          copyBtn.textContent = "\uBCF5\uC0AC";
+        }, 1200);
+      } catch (_) {
+        alert("\uBCF5\uC0AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.");
+      }
+    });
+
+    taskDescriptionDialog = dialog;
+    return dialog;
+  }
+
+  function showTaskDescriptionModal(options = {}) {
+    const dialog = ensureTaskDescriptionDialog();
+    const title = dialog.querySelector("#task-desc-dialog-title");
+    const meta = dialog.querySelector("#task-desc-dialog-meta");
+    const body = dialog.querySelector("#task-desc-dialog-body");
+    const copyBtn = dialog.querySelector("#task-desc-copy-btn");
+
+    const rawTitle =
+      String(options.title || "\uC791\uC5C5 \uC124\uBA85").trim() || "\uC791\uC5C5 \uC124\uBA85";
+    const rawDescription = String(options.description || "").trim();
+    const metaParts = [
+      options.projectName ? `\uD504\uB85C\uC81D\uD2B8: ${String(options.projectName).trim()}` : "",
+      options.stageName ? `\uB300\uD56D\uBAA9: ${String(options.stageName).trim()}` : "",
+      options.targetDate ? `\uBAA9\uD45C\uC77C: ${String(options.targetDate).trim()}` : "",
+    ].filter(Boolean);
+
+    if (title) title.textContent = rawTitle;
+    if (meta) meta.textContent = metaParts.join(" | ");
+    if (copyBtn) copyBtn.setAttribute("data-copy-text", rawDescription);
+    if (body) {
+      body.innerHTML = "";
+      if (rawDescription) {
+        appendLinkedText(body, rawDescription);
+      } else {
+        body.textContent = "\uB4F1\uB85D\uB41C \uC124\uBA85\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
+      }
+    }
+
+    if (!dialog.open) {
+      dialog.showModal();
+    }
+  }
+
   global.PMCommon = {
+    appendLinkedText,
     applyThemeColor,
     applyUserTheme,
     createApiClient,
@@ -149,6 +266,7 @@
     getCookie,
     normalizeThemeColor,
     parseApiError,
+    showTaskDescriptionModal,
     withCsrfHeader,
   };
 })(window);

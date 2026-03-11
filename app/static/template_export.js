@@ -47,6 +47,7 @@ function normalizeTemplateItems(items, stages) {
     grouped.get(stage).push({
       stage,
       content,
+      description: String(item.description || "").trim(),
       position: Number.isFinite(Number(item.position)) ? Number(item.position) : 0,
     });
   }
@@ -62,6 +63,7 @@ function normalizeTemplateItems(items, stages) {
       out.push({
         stage: row.stage,
         content: row.content,
+        description: row.description || "",
         position: idx,
       });
     });

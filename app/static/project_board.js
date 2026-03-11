@@ -20,7 +20,7 @@ if (!projectId) {
   throw new Error("Invalid project_id");
 }
 
-const { createApiClient, escapeHtml, parseApiError, applyUserTheme } = window.PMCommon;
+const { createApiClient, escapeHtml, parseApiError, applyUserTheme, showTaskDescriptionModal } = window.PMCommon;
 const api = createApiClient();
 
 const els = {
@@ -34,6 +34,7 @@ const els = {
 let checklistItems = [];
 let projectStages = [];
 let draggingChecklistId = null;
+let projectTitle = "프로젝트";
 
 function stageLabel(stage) {
   const foundDynamic = projectStages.find((x) => x.stage_key === stage);
@@ -50,6 +51,7 @@ async function loadSession() {
 
 async function loadProject() {
   const project = await api.get(`/api/projects/${projectId}`);
+  projectTitle = project.name || "프로젝트";
   els.title.textContent = `${project.name || "프로젝트"} - 작업 보드`;
   if (els.settingsLink) {
     els.settingsLink.href = `/static/project_settings.html?project_id=${projectId}`;
@@ -89,7 +91,11 @@ function renderBoard() {
             <span class="badge stage-tag">${escapeHtml(stageLabel(item.stage))}</span>
             <span class="item__meta">${escapeHtml(item.target_date || "-")}</span>
           </div>
-          <div>${escapeHtml(item.content)}</div>
+          <button type="button" class="task-detail-trigger task-detail-trigger--card" data-open-task-description="${
+            item.id
+          }">
+            ${escapeHtml(item.content)}
+          </button>
         </article>
       `
       )
@@ -147,6 +153,22 @@ function bindBoardDragEvents() {
     });
   });
 }
+
+els.board?.addEventListener("click", (e) => {
+  const detailBtn = e.target.closest("[data-open-task-description]");
+  if (!detailBtn) return;
+  const itemId = Number(detailBtn.getAttribute("data-open-task-description"));
+  const item = checklistItems.find((x) => Number(x.id) === itemId);
+  if (!item) return;
+
+  showTaskDescriptionModal({
+    title: item.content || "작업 설명",
+    description: item.description || "",
+    projectName: projectTitle,
+    stageName: stageLabel(item.stage),
+    targetDate: item.target_date || "",
+  });
+});
 
 async function loadChecklist() {
   checklistItems = await api.get(`/api/projects/${projectId}/checklists`);
