@@ -30,6 +30,7 @@ DEFAULT_CORS_ORIGINS = ["http://127.0.0.1:8000", "http://127.0.0.1:8080", "http:
 CSRF_EXEMPT_PATHS = {"/api/auth/login", "/api/auth/register", "/api/health"}
 DEFAULT_DASHBOARD_TITLE = "Company Project Hub"
 DEFAULT_DASHBOARD_SUBTITLE = "프로젝트와 작업을 한 화면에서 관리하세요."
+SIGNUP_CODE_SETTING_KEY = "signup_code_hash"
 DEFAULT_PROJECT_STAGES = [
     {"key": "data_acquisition", "name": "1. 데이터 획득"},
     {"key": "labeling", "name": "2. 라벨링"},
@@ -671,6 +672,16 @@ def get_dashboard_branding(conn: sqlite3.Connection) -> dict[str, str]:
     }
 
 
+def get_signup_code_hash(conn: sqlite3.Connection) -> str:
+    return get_site_setting(conn, SIGNUP_CODE_SETTING_KEY, "")
+
+
+def get_registration_settings(conn: sqlite3.Connection) -> dict[str, bool]:
+    return {
+        "signup_code_configured": bool(get_signup_code_hash(conn)),
+    }
+
+
 def user_public(user_row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": user_row["id"],
@@ -947,6 +958,7 @@ class RegisterRequest(BaseModel):
     username: str = Field(min_length=2, max_length=40, pattern=r"^[a-zA-Z0-9._-]+$")
     display_name: str = Field(min_length=2, max_length=60)
     password: str = Field(min_length=6, max_length=128)
+    signup_code: str = Field(min_length=1, max_length=128)
 
 
 class AdminUserCreate(BaseModel):
@@ -970,6 +982,11 @@ class AdminDashboardBrandingUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     dashboard_title: str | None = Field(default=None, min_length=2, max_length=120)
     dashboard_subtitle: str | None = Field(default=None, min_length=2, max_length=300)
+
+
+class AdminRegistrationSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    signup_code: str = Field(min_length=4, max_length=128)
 
 
 class UserSettingsProfileUpdate(BaseModel):
@@ -1179,8 +1196,14 @@ def login(payload: LoginRequest, request: Request, response: Response) -> dict[s
 def register(payload: RegisterRequest) -> dict[str, Any]:
     username = payload.username.strip()
     display_name = payload.display_name.strip()
+    signup_code = payload.signup_code.strip()
 
     with get_db() as conn:
+        signup_code_hash = get_signup_code_hash(conn)
+        if not signup_code_hash:
+            raise HTTPException(status_code=403, detail="Signup code is not configured. Contact admin.")
+        if not verify_password(signup_code, signup_code_hash):
+            raise HTTPException(status_code=400, detail="Invalid signup code.")
         exists = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
         if exists:
             raise HTTPException(status_code=400, detail="Username already exists.")
@@ -1410,6 +1433,12 @@ def admin_get_site_branding(_: dict[str, Any] = Depends(get_admin_user)) -> dict
         return get_dashboard_branding(conn)
 
 
+@app.get("/api/admin/registration-settings")
+def admin_get_registration_settings(_: dict[str, Any] = Depends(get_admin_user)) -> dict[str, bool]:
+    with get_db() as conn:
+        return get_registration_settings(conn)
+
+
 @app.patch("/api/admin/site-branding")
 def admin_update_site_branding(
     payload: AdminDashboardBrandingUpdate,
@@ -1448,6 +1477,30 @@ def admin_update_site_branding(
             )
         conn.commit()
         return get_dashboard_branding(conn)
+
+
+@app.patch("/api/admin/registration-settings")
+def admin_update_registration_settings(
+    payload: AdminRegistrationSettingsUpdate,
+    _: dict[str, Any] = Depends(get_admin_user),
+) -> dict[str, bool]:
+    signup_code = payload.signup_code.strip()
+    if not signup_code:
+        raise HTTPException(status_code=400, detail="Signup code cannot be empty.")
+
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value=excluded.value,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (SIGNUP_CODE_SETTING_KEY, hash_password(signup_code)),
+        )
+        conn.commit()
+        return get_registration_settings(conn)
 
 
 @app.get("/api/dashboard")

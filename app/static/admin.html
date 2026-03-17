@@ -13,14 +13,14 @@
           <a class="btn-link" href="/">대시보드로 돌아가기</a>
           <button id="logout-btn" type="button">로그아웃</button>
         </div>
-        <h1>Admin - 사용자/프로젝트 관리</h1>
+        <h1>Admin - 사용자 및 프로젝트 관리</h1>
       </div>
     </header>
 
     <main class="layout">
       <section class="panel">
         <h2>대시보드 문구 설정</h2>
-        <p class="item__meta">메인 페이지 상단 제목/설명을 변경합니다.</p>
+        <p class="item__meta">메인 페이지 상단 제목과 설명을 변경합니다.</p>
         <form id="site-branding-form" class="form-grid">
           <input id="dashboard-title-input" name="dashboard_title" placeholder="상단 제목" minlength="2" maxlength="120" required />
           <input
@@ -32,6 +32,55 @@
             required
           />
           <button type="submit">문구 저장</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>회원가입 코드 설정</h2>
+        <p class="item__meta">여기서 저장한 가입 코드를 입력한 사용자만 회원가입할 수 있습니다.</p>
+        <div id="signup-code-status" class="item__meta">가입 코드 상태 확인 중...</div>
+        <form id="signup-code-form" class="form-grid" style="margin-top: 10px">
+          <input
+            id="signup-code-input"
+            name="signup_code"
+            type="password"
+            placeholder="새 가입 코드"
+            minlength="4"
+            maxlength="128"
+            required
+          />
+          <button type="submit">가입 코드 저장</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>관리자 비밀번호 변경</h2>
+        <p class="item__meta">현재 로그인한 관리자 계정의 비밀번호를 변경합니다.</p>
+        <form id="admin-password-form" class="form-grid">
+          <input
+            id="admin-current-password"
+            name="current_password"
+            type="password"
+            placeholder="현재 비밀번호"
+            required
+          />
+          <input
+            id="admin-new-password"
+            name="new_password"
+            type="password"
+            placeholder="새 비밀번호 (6자 이상)"
+            minlength="6"
+            required
+          />
+          <input
+            id="admin-new-password-confirm"
+            name="new_password_confirm"
+            type="password"
+            placeholder="새 비밀번호 확인"
+            minlength="6"
+            required
+          />
+          <button type="submit">비밀번호 변경</button>
         </form>
       </section>
 
@@ -81,6 +130,6 @@
       </section>
     </main>
     <script src="/static/common.js?v=20260311_1"></script>
-    <script src="/static/admin.js?v=20260305_2"></script>
+    <script src="/static/admin.js?v=20260317_2"></script>
   </body>
 </html>

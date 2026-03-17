@@ -49,6 +49,7 @@ registerForm?.addEventListener("submit", async (e) => {
     await registerLocal({
       username: payload.username,
       display_name: payload.display_name,
+      signup_code: String(payload.signup_code || "").trim(),
       password,
     });
 

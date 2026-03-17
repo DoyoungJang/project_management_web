@@ -22,7 +22,7 @@ if (Test-Path $envFile) {
 }
 
 if (-not $env:BOOTSTRAP_ADMIN_USERNAME) { $env:BOOTSTRAP_ADMIN_USERNAME = "admin" }
-if (-not $env:BOOTSTRAP_ADMIN_PASSWORD) { $env:BOOTSTRAP_ADMIN_PASSWORD = "ChangeMe_Immediately_123!" }
+if (-not $env:BOOTSTRAP_ADMIN_PASSWORD) { $env:BOOTSTRAP_ADMIN_PASSWORD = "admin123" }
 if (-not $env:CORS_ALLOW_ORIGINS) { $env:CORS_ALLOW_ORIGINS = "http://127.0.0.1:$Port,http://localhost:$Port" }
 if (-not $env:SESSION_COOKIE_SECURE) { $env:SESSION_COOKIE_SECURE = "0" }
 

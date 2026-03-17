@@ -23,6 +23,7 @@
         <form id="register-form" class="auth-form">
           <input name="username" placeholder="가입 아이디" required minlength="2" maxlength="40" pattern="^[a-zA-Z0-9._-]+$" />
           <input name="display_name" placeholder="이름" required minlength="2" maxlength="60" />
+          <input name="signup_code" type="password" placeholder="가입 코드" required minlength="4" maxlength="128" />
           <input name="password" type="password" placeholder="비밀번호" required minlength="6" />
           <input name="confirm_password" type="password" placeholder="비밀번호 확인" required minlength="6" />
           <button type="submit">회원가입</button>
@@ -31,7 +32,7 @@
         <div class="auth-note">초기 관리자 계정은 서버의 <code>BOOTSTRAP_ADMIN_*</code> 환경변수로 설정됩니다.</div>
       </section>
     </main>
-    <script src="/static/common.js?v=20260301_2"></script>
-    <script src="/static/login.js?v=20260301_2"></script>
+    <script src="/static/common.js?v=20260317_1"></script>
+    <script src="/static/login.js?v=20260317_1"></script>
   </body>
 </html>

@@ -28,6 +28,10 @@ const els = {
   brandingForm: document.getElementById("site-branding-form"),
   dashboardTitleInput: document.getElementById("dashboard-title-input"),
   dashboardSubtitleInput: document.getElementById("dashboard-subtitle-input"),
+  signupCodeForm: document.getElementById("signup-code-form"),
+  signupCodeInput: document.getElementById("signup-code-input"),
+  signupCodeStatus: document.getElementById("signup-code-status"),
+  adminPasswordForm: document.getElementById("admin-password-form"),
   createForm: document.getElementById("create-user-form"),
   usersList: document.getElementById("users-list"),
   userFilterInput: document.getElementById("user-filter-input"),
@@ -55,6 +59,7 @@ const LIMITS = {
 const state = {
   currentUser: null,
   branding: null,
+  registrationSettings: null,
   users: [],
   projects: [],
   participantsByProject: new Map(),
@@ -264,6 +269,17 @@ async function loadBranding() {
   }
 }
 
+async function loadRegistrationSettings() {
+  state.registrationSettings = await api.get("/api/admin/registration-settings");
+  if (!els.signupCodeStatus) return;
+  els.signupCodeStatus.textContent = state.registrationSettings?.signup_code_configured
+    ? "현재 가입 코드가 설정되어 있습니다. 새 코드를 저장하면 즉시 변경됩니다."
+    : "현재 가입 코드가 설정되어 있지 않습니다. 설정 전에는 신규 회원가입이 차단됩니다.";
+  if (els.signupCodeInput) {
+    els.signupCodeInput.value = "";
+  }
+}
+
 async function loadUsers() {
   state.users = await api.get("/api/admin/users");
   renderUsers();
@@ -291,7 +307,7 @@ async function loadProjects() {
 }
 
 async function refreshAll() {
-  await Promise.all([loadBranding(), loadUsers(), loadProjects()]);
+  await Promise.all([loadBranding(), loadRegistrationSettings(), loadUsers(), loadProjects()]);
 }
 
 async function handleCreateUser(event) {
@@ -350,6 +366,54 @@ async function handleBrandingSave(event) {
     if (els.dashboardTitleInput) els.dashboardTitleInput.value = updated.dashboard_title || "";
     if (els.dashboardSubtitleInput) els.dashboardSubtitleInput.value = updated.dashboard_subtitle || "";
     alert("대시보드 문구를 저장했습니다.");
+  } catch (error) {
+    alert(parseApiError(error));
+  }
+}
+
+async function handleSignupCodeSave(event) {
+  event.preventDefault();
+  const signupCode = String(els.signupCodeInput?.value || "").trim();
+  if (!signupCode) {
+    alert("가입 코드를 입력해 주세요.");
+    els.signupCodeInput?.focus();
+    return;
+  }
+
+  try {
+    const updated = await api.patch("/api/admin/registration-settings", {
+      signup_code: signupCode,
+    });
+    state.registrationSettings = updated;
+    if (els.signupCodeInput) els.signupCodeInput.value = "";
+    if (els.signupCodeStatus) {
+      els.signupCodeStatus.textContent = "가입 코드가 저장되었습니다. 이제 해당 코드를 입력한 사용자만 가입할 수 있습니다.";
+    }
+  } catch (error) {
+    alert(parseApiError(error));
+  }
+}
+
+async function handleAdminPasswordSave(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(els.adminPasswordForm).entries());
+  const currentPassword = String(payload.current_password || "");
+  const newPassword = String(payload.new_password || "");
+  const confirmPassword = String(payload.new_password_confirm || "");
+
+  if (newPassword !== confirmPassword) {
+    alert("새 비밀번호 확인이 일치하지 않습니다.");
+    els.adminPasswordForm.elements.new_password_confirm?.focus();
+    return;
+  }
+
+  try {
+    await api.patch("/api/auth/settings/password", {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+    els.adminPasswordForm.reset();
+    alert("관리자 비밀번호를 변경했습니다.");
   } catch (error) {
     alert(parseApiError(error));
   }
@@ -526,6 +590,8 @@ els.projectsOverflowToggle?.addEventListener("click", () => {
 
 els.createForm?.addEventListener("submit", handleCreateUser);
 els.brandingForm?.addEventListener("submit", handleBrandingSave);
+els.signupCodeForm?.addEventListener("submit", handleSignupCodeSave);
+els.adminPasswordForm?.addEventListener("submit", handleAdminPasswordSave);
 els.usersList?.addEventListener("click", handleUsersListClick);
 els.projectsList?.addEventListener("click", handleProjectsListClick);
 
