@@ -378,8 +378,9 @@ def init_db() -> None:
                 description TEXT DEFAULT '',
                 is_done INTEGER NOT NULL DEFAULT 0,
                 workflow_status TEXT NOT NULL DEFAULT 'upcoming'
-                    CHECK (workflow_status IN ('upcoming', 'inprogress', 'done')),
+                    CHECK (workflow_status IN ('backlog', 'upcoming', 'inprogress', 'done')),
                 position INTEGER NOT NULL DEFAULT 0,
+                start_date TEXT,
                 target_date TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -455,6 +456,7 @@ def init_db() -> None:
         ensure_column(conn, "users", "theme_color", "TEXT NOT NULL DEFAULT '#0f6d66'")
         ensure_column(conn, "user_sessions", "csrf_token", "TEXT")
         ensure_column(conn, "project_checklist_items", "target_date", "TEXT")
+        ensure_column(conn, "project_checklist_items", "start_date", "TEXT")
         ensure_column(conn, "project_checklist_items", "workflow_status", "TEXT NOT NULL DEFAULT 'upcoming'")
         ensure_column(conn, "project_checklist_items", "description", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "checklist_template_items", "description", "TEXT NOT NULL DEFAULT ''")
@@ -463,7 +465,11 @@ def init_db() -> None:
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='project_checklist_items'"
         ).fetchone()
         checklist_table_sql = str(checklist_table_sql_row["sql"] or "") if checklist_table_sql_row else ""
-        if "CHECK (stage IN ('data_acquisition', 'labeling', 'development'))" in checklist_table_sql:
+        checklist_needs_rebuild = (
+            "CHECK (stage IN ('data_acquisition', 'labeling', 'development'))" in checklist_table_sql
+            or "CHECK (workflow_status IN ('upcoming', 'inprogress', 'done'))" in checklist_table_sql
+        )
+        if checklist_needs_rebuild:
             conn.executescript(
                 """
                 ALTER TABLE project_checklist_items RENAME TO project_checklist_items_legacy;
@@ -476,21 +482,22 @@ def init_db() -> None:
                     description TEXT DEFAULT '',
                     is_done INTEGER NOT NULL DEFAULT 0,
                     workflow_status TEXT NOT NULL DEFAULT 'upcoming'
-                        CHECK (workflow_status IN ('upcoming', 'inprogress', 'done')),
+                        CHECK (workflow_status IN ('backlog', 'upcoming', 'inprogress', 'done')),
                     position INTEGER NOT NULL DEFAULT 0,
+                    start_date TEXT,
                     target_date TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
                 );
 
                 INSERT INTO project_checklist_items
-                    (id, project_id, stage, content, description, is_done, workflow_status, position, target_date, created_at)
+                    (id, project_id, stage, content, description, is_done, workflow_status, position, start_date, target_date, created_at)
                 SELECT
                     id,
                     project_id,
                     stage,
                     content,
-                    '',
+                    COALESCE(description, ''),
                     is_done,
                     CASE
                         WHEN workflow_status IS NULL OR workflow_status='' THEN
@@ -498,6 +505,7 @@ def init_db() -> None:
                         ELSE workflow_status
                     END,
                     position,
+                    start_date,
                     target_date,
                     created_at
                 FROM project_checklist_items_legacy;
@@ -1030,8 +1038,9 @@ class ChecklistItemCreate(BaseModel):
     stage: str = Field(min_length=1, max_length=60, pattern=r"^[a-z0-9_]+$")
     content: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=5000)
+    start_date: str | None = None
     target_date: str | None = None
-    workflow_status: str = Field(default="upcoming", pattern="^(upcoming|inprogress|done)$")
+    workflow_status: str = Field(default="upcoming", pattern="^(backlog|upcoming|inprogress|done)$")
 
 
 class ChecklistItemUpdate(BaseModel):
@@ -1041,8 +1050,9 @@ class ChecklistItemUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=5000)
     is_done: bool | None = None
     position: int | None = Field(default=None, ge=0)
+    start_date: str | None = None
     target_date: str | None = None
-    workflow_status: str | None = Field(default=None, pattern="^(upcoming|inprogress|done)$")
+    workflow_status: str | None = Field(default=None, pattern="^(backlog|upcoming|inprogress|done)$")
 
 
 class NotificationRuleCreate(BaseModel):
@@ -1948,10 +1958,11 @@ def list_project_checklists(
             WHERE c.project_id=?
             ORDER BY
                 CASE c.workflow_status
-                    WHEN 'upcoming' THEN 1
-                    WHEN 'inprogress' THEN 2
-                    WHEN 'done' THEN 3
-                    ELSE 4
+                    WHEN 'backlog' THEN 1
+                    WHEN 'upcoming' THEN 2
+                    WHEN 'inprogress' THEN 3
+                    WHEN 'done' THEN 4
+                    ELSE 5
                 END,
                 c.position ASC,
                 COALESCE(ps.position, 999) ASC,
@@ -1982,8 +1993,8 @@ def create_checklist_item(
         cur = conn.execute(
             """
             INSERT INTO project_checklist_items
-                (project_id, stage, content, description, is_done, workflow_status, position, target_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (project_id, stage, content, description, is_done, workflow_status, position, start_date, target_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 project_id,
@@ -1993,6 +2004,7 @@ def create_checklist_item(
                 is_done,
                 payload.workflow_status,
                 int(next_pos_row["next_position"]),
+                payload.start_date,
                 payload.target_date,
             ),
         )
@@ -2031,6 +2043,10 @@ def update_checklist_item(
         if "stage" in updates:
             updates["stage"] = str(updates["stage"]).strip()
             ensure_project_stage_exists(conn, int(current["project_id"]), updates["stage"])
+        if "start_date" in updates:
+            updates["start_date"] = str(updates["start_date"]).strip() or None
+        if "target_date" in updates:
+            updates["target_date"] = str(updates["target_date"]).strip() or None
 
         if "is_done" in updates:
             updates["is_done"] = 1 if updates["is_done"] else 0
@@ -2262,7 +2278,9 @@ def my_upcoming_checklists(
                     c.stage,
                     c.content,
                     c.description,
+                    c.start_date,
                     c.target_date,
+                    c.workflow_status,
                     CAST(julianday(date(c.target_date)) - julianday(date('now','localtime')) AS INTEGER) AS days_left,
                     'admin' AS membership_type
                 FROM project_checklist_items c
@@ -2284,7 +2302,9 @@ def my_upcoming_checklists(
                     c.stage,
                     c.content,
                     c.description,
+                    c.start_date,
                     c.target_date,
+                    c.workflow_status,
                     CAST(julianday(date(c.target_date)) - julianday(date('now','localtime')) AS INTEGER) AS days_left,
                     CASE WHEN p.owner=? THEN 'owner' ELSE 'participant' END AS membership_type
                 FROM project_checklist_items c
@@ -3119,8 +3139,8 @@ def apply_template_to_project(
             conn.execute(
                 """
                 INSERT INTO project_checklist_items
-                    (project_id, stage, content, description, is_done, workflow_status, position, target_date)
-                VALUES (?, ?, ?, ?, 0, 'upcoming', ?, NULL)
+                    (project_id, stage, content, description, is_done, workflow_status, position, start_date, target_date)
+                VALUES (?, ?, ?, ?, 0, 'upcoming', ?, NULL, NULL)
                 """,
                 (project_id, item["stage"], item["content"], item["description"] or "", idx),
             )

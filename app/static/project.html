@@ -12,6 +12,7 @@
         <div class="topbar">
           <div class="actions">
             <a class="btn-link" href="/">프로젝트 목록</a>
+            <a id="project-gantt-link" class="btn-link" href="#">간트 차트</a>
           </div>
           <div class="actions">
             <a class="btn-link" href="/static/settings.html">내 설정</a>
@@ -35,6 +36,10 @@
       <section class="panel">
         <h2>작업 보드 (Drag & Drop)</h2>
         <div id="kanban-board" class="kanban-board">
+          <div class="kanban-col" data-status="backlog">
+            <h3>Backlog</h3>
+            <div class="kanban-drop" data-drop-zone="backlog"></div>
+          </div>
           <div class="kanban-col" data-status="upcoming">
             <h3>Upcoming</h3>
             <div class="kanban-drop" data-drop-zone="upcoming"></div>
@@ -51,7 +56,7 @@
       </section>
     </main>
 
-    <script src="/static/common.js?v=20260311_1"></script>
-    <script src="/static/project_board.js?v=20260311_1"></script>
+    <script src="/static/common.js?v=20260319_3"></script>
+    <script src="/static/project_board.js?v=20260319_3"></script>
   </body>
 </html>

@@ -188,6 +188,7 @@ function renderProjects() {
         <div class="item__meta">담당: ${escapeHtml(p.owner)} | 마감: ${escapeHtml(p.due_date || "-")}</div>
         <div class="actions">
           <button data-open-project="${p.id}">작업 보드</button>
+          <button data-open-project-gantt="${p.id}">간트 차트</button>
           <button class="btn-settings" data-open-project-settings="${p.id}">프로젝트 설정</button>
           ${canDelete ? `<button class="danger" data-del-project="${p.id}">삭제</button>` : ""}
         </div>
@@ -251,6 +252,13 @@ els.projectList?.addEventListener("click", async (e) => {
     return;
   }
 
+  const ganttBtn = e.target.closest("[data-open-project-gantt]");
+  if (ganttBtn) {
+    const id = ganttBtn.getAttribute("data-open-project-gantt");
+    window.location.href = `/static/project_gantt.html?project_id=${id}`;
+    return;
+  }
+
   const delBtn = e.target.closest("[data-del-project]");
   if (!delBtn) return;
 
@@ -284,7 +292,24 @@ els.todayNotifications?.addEventListener("click", (e) => {
       description: item.description || "",
       projectName: item.project_name || "",
       stageName: stageLabel(item.stage),
+      startDate: item.start_date || "",
       targetDate: item.target_date || "",
+      workflowStatus: item.workflow_status || "upcoming",
+      editable: Boolean(currentUser?.is_admin || item.membership_type === "owner" || item.membership_type === "admin"),
+      onSave: async (payload) => {
+        const saved = await api.patch(`/api/checklists/${checklistId}`, {
+          content: payload.content,
+          description: payload.description,
+          start_date: payload.start_date,
+          target_date: payload.target_date,
+          workflow_status: payload.workflow_status,
+        });
+        await refreshAll();
+        return {
+          ...saved,
+          stageName: stageLabel(saved.stage || item.stage),
+        };
+      },
     });
     return;
   }

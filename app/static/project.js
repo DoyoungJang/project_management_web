@@ -5,6 +5,7 @@
 ];
 
 const BOARD = [
+  { key: "backlog", title: "Backlog" },
   { key: "upcoming", title: "Upcoming" },
   { key: "inprogress", title: "In Progress" },
   { key: "done", title: "Done" },
@@ -55,6 +56,7 @@ function stageLabel(stage) {
 
 function workflowStatusLabel(status) {
   const map = {
+    backlog: "Backlog",
     upcoming: "Upcoming",
     inprogress: "In Progress",
     done: "Done",
@@ -66,6 +68,12 @@ function descriptionPreview(value) {
   const normalized = String(value || "").replace(/\s+/g, " ").trim();
   if (!normalized) return "설명 없음";
   return normalized.length > 80 ? `${normalized.slice(0, 80)}...` : normalized;
+}
+
+function schedulePreview(item) {
+  return `시작일: ${item.start_date || "-"} | 목표일: ${item.target_date || "-"} | 상태: ${workflowStatusLabel(
+    item.workflow_status || "upcoming"
+  )}`;
 }
 
 async function loadSession() {
@@ -243,12 +251,17 @@ function renderStage(stage) {
               >${escapeHtml(item.description || "")}</textarea>
               <div class="project-item-editor__grid">
                 <label class="project-item-editor__field">
+                  <span class="item__meta">시작일</span>
+                  <input name="start_date" type="date" value="${item.start_date || ""}" />
+                </label>
+                <label class="project-item-editor__field">
                   <span class="item__meta">목표일</span>
                   <input name="target_date" type="date" value="${item.target_date || ""}" />
                 </label>
                 <label class="project-item-editor__field">
                   <span class="item__meta">상태</span>
                   <select name="workflow_status">
+                    <option value="backlog" ${item.workflow_status === "backlog" ? "selected" : ""}>Backlog</option>
                     <option value="upcoming" ${item.workflow_status === "upcoming" ? "selected" : ""}>Upcoming</option>
                     <option value="inprogress" ${item.workflow_status === "inprogress" ? "selected" : ""}>In Progress</option>
                     <option value="done" ${item.workflow_status === "done" ? "selected" : ""}>Done</option>
@@ -276,11 +289,7 @@ function renderStage(stage) {
               <div class="template-item-card__body">
                 <strong class="${item.is_done ? "check-done" : ""}">${escapeHtml(item.content)}</strong>
                 <div class="item__meta">${escapeHtml(descriptionPreview(item.description || ""))}</div>
-                <div class="item__meta">
-                  목표일: ${escapeHtml(item.target_date || "-")} | 상태: ${escapeHtml(
-                    workflowStatusLabel(item.workflow_status || "upcoming")
-                  )}
-                </div>
+                <div class="item__meta">${escapeHtml(schedulePreview(item))}</div>
               </div>
               <div class="actions">
                 <button type="button" data-edit-checklist="${item.id}">수정</button>
@@ -303,6 +312,10 @@ function renderStage(stage) {
         <textarea name="description" placeholder="설명 팝업 내용 입력" maxlength="5000"></textarea>
         <div class="project-item-editor__grid">
           <label class="project-item-editor__field">
+            <span class="item__meta">시작일</span>
+            <input name="start_date" type="date" />
+          </label>
+          <label class="project-item-editor__field">
             <span class="item__meta">목표일</span>
             <input name="target_date" type="date" />
           </label>
@@ -310,6 +323,7 @@ function renderStage(stage) {
             <span class="item__meta">상태</span>
             <select name="workflow_status">
               <option value="upcoming">Upcoming</option>
+              <option value="backlog">Backlog</option>
               <option value="inprogress">In Progress</option>
               <option value="done">Done</option>
             </select>
@@ -531,6 +545,7 @@ els.stages?.addEventListener("submit", async (e) => {
     await api.patch(`/api/checklists/${itemId}`, {
       content,
       description: String(payload.description || "").trim(),
+      start_date: payload.start_date || null,
       target_date: payload.target_date || null,
       workflow_status: payload.workflow_status || "upcoming",
       is_done: Boolean(payload.is_done),
@@ -549,6 +564,7 @@ els.stages?.addEventListener("submit", async (e) => {
     stage,
     content: String(payload.content || "").trim(),
     description: String(payload.description || "").trim(),
+    start_date: payload.start_date || null,
     target_date: payload.target_date || null,
     workflow_status: payload.workflow_status || "upcoming",
   };

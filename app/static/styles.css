@@ -572,8 +572,10 @@ button:active {
 
 .kanban-board {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(240px, 1fr));
   gap: 10px;
+  overflow-x: auto;
+  align-items: start;
 }
 
 .kanban-col {
@@ -775,6 +777,208 @@ button:active {
   gap: 10px;
 }
 
+.gantt-panel__header {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.gantt-controls {
+  grid-template-columns: repeat(2, minmax(160px, 220px)) auto auto;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.gantt-controls__field {
+  min-width: 0;
+}
+
+.gantt-legend {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.gantt-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.gantt-legend__swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.gantt-scroll {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.gantt-board {
+  min-width: fit-content;
+  display: grid;
+  gap: 10px;
+}
+
+.gantt-row {
+  display: grid;
+  grid-template-columns: 260px auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.gantt-row--header {
+  align-items: end;
+}
+
+.gantt-label {
+  display: grid;
+  gap: 4px;
+}
+
+.gantt-label--header {
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.gantt-track-wrap {
+  overflow: hidden;
+}
+
+.gantt-days,
+.gantt-track {
+  --gantt-cell-width: 38px;
+  width: calc(var(--gantt-days) * var(--gantt-cell-width));
+  min-height: 44px;
+  position: relative;
+}
+
+.gantt-days {
+  display: grid;
+  grid-template-columns: repeat(var(--gantt-days), var(--gantt-cell-width));
+}
+
+.gantt-days--condensed {
+  min-height: 54px;
+}
+
+.gantt-day {
+  border-left: 1px solid #e7edf6;
+  padding-top: 6px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.gantt-day.is-week-start {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.gantt-day.is-month-start {
+  border-left-color: #b7c7dd;
+}
+
+.gantt-header-labels {
+  position: absolute;
+  inset: 4px 0 auto 0;
+  height: 20px;
+  pointer-events: none;
+}
+
+.gantt-header-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 0 4px;
+}
+
+.gantt-header-label.is-start {
+  left: 0 !important;
+  transform: none;
+}
+
+.gantt-header-label.is-end {
+  left: auto !important;
+  right: 0;
+  transform: none;
+}
+
+.gantt-track {
+  border-radius: 10px;
+  background:
+    repeating-linear-gradient(
+      to right,
+      #f8fbff 0,
+      #f8fbff calc(var(--gantt-cell-width) - 1px),
+      #e7edf6 calc(var(--gantt-cell-width) - 1px),
+      #e7edf6 var(--gantt-cell-width)
+    );
+  border: 1px solid #e0e7f1;
+}
+
+.gantt-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  pointer-events: none;
+}
+
+.gantt-marker--today {
+  background: #0f6d66;
+  opacity: 0.65;
+}
+
+.gantt-marker--due {
+  background: #c0362c;
+  opacity: 0.45;
+}
+
+.gantt-bar {
+  position: absolute;
+  top: 7px;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  width: calc(var(--gantt-cell-width) - 8px);
+  margin-left: 4px;
+  border-radius: 999px;
+  border: none;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.gantt-bar:hover {
+  opacity: 1;
+}
+
+.gantt-bar:focus-visible {
+  outline: 2px solid #0b0f14;
+  outline-offset: 2px;
+}
+
+.gantt-bar:active {
+  transform: none;
+}
+
 .text-edit,
 .date-edit {
   display: grid;
@@ -843,6 +1047,21 @@ button[data-edit-content-board]:hover {
   white-space: normal;
   overflow-wrap: anywhere;
   user-select: text;
+}
+
+.task-desc-edit-form {
+  display: grid;
+  gap: 12px;
+}
+
+.task-desc-edit-form__field {
+  display: grid;
+  gap: 6px;
+}
+
+.task-desc-edit-form__field textarea {
+  min-height: 140px;
+  resize: vertical;
 }
 
 .task-desc-link {
@@ -962,6 +1181,14 @@ details.item[open] > .admin-user-summary {
     display: grid;
   }
 
+  .gantt-row {
+    grid-template-columns: 200px auto;
+  }
+
+  .gantt-controls {
+    grid-template-columns: 1fr;
+  }
+
   .segmented {
     width: 100%;
     justify-content: flex-start;
@@ -969,7 +1196,7 @@ details.item[open] > .admin-user-summary {
   }
 
   .kanban-board {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(4, minmax(220px, 1fr));
   }
 
   .work-layout {

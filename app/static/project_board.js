@@ -5,6 +5,7 @@
 ];
 
 const BOARD = [
+  { key: "backlog", title: "Backlog" },
   { key: "upcoming", title: "Upcoming" },
   { key: "inprogress", title: "In Progress" },
   { key: "done", title: "Done" },
@@ -29,12 +30,15 @@ const els = {
   adminLink: document.getElementById("admin-link"),
   logoutBtn: document.getElementById("logout-btn"),
   settingsLink: document.getElementById("project-settings-link"),
+  ganttLink: document.getElementById("project-gantt-link"),
 };
 
 let checklistItems = [];
 let projectStages = [];
 let draggingChecklistId = null;
 let projectTitle = "프로젝트";
+let currentUser = null;
+let canEditTasks = false;
 
 function stageLabel(stage) {
   const foundDynamic = projectStages.find((x) => x.stage_key === stage);
@@ -45,6 +49,7 @@ function stageLabel(stage) {
 
 async function loadSession() {
   const me = await api.get("/api/auth/me");
+  currentUser = me;
   applyUserTheme(me);
   if (me.is_admin) els.adminLink.classList.remove("hidden");
 }
@@ -52,9 +57,13 @@ async function loadSession() {
 async function loadProject() {
   const project = await api.get(`/api/projects/${projectId}`);
   projectTitle = project.name || "프로젝트";
+  canEditTasks = Boolean(currentUser?.is_admin || project.owner === currentUser?.username);
   els.title.textContent = `${project.name || "프로젝트"} - 작업 보드`;
   if (els.settingsLink) {
     els.settingsLink.href = `/static/project_settings.html?project_id=${projectId}`;
+  }
+  if (els.ganttLink) {
+    els.ganttLink.href = `/static/project_gantt.html?project_id=${projectId}`;
   }
 }
 
@@ -166,7 +175,22 @@ els.board?.addEventListener("click", (e) => {
     description: item.description || "",
     projectName: projectTitle,
     stageName: stageLabel(item.stage),
+    startDate: item.start_date || "",
     targetDate: item.target_date || "",
+    workflowStatus: normalizeWorkflowStatus(item),
+    editable: canEditTasks,
+    onSave: async (payload) => {
+      await api.patch(`/api/checklists/${itemId}`, {
+        content: payload.content,
+        description: payload.description,
+        start_date: payload.start_date,
+        target_date: payload.target_date,
+        workflow_status: payload.workflow_status,
+      });
+      await loadChecklist();
+      const refreshed = checklistItems.find((x) => Number(x.id) === itemId);
+      return refreshed ? { ...refreshed, stageName: stageLabel(refreshed.stage) } : null;
+    },
   });
 });
 
