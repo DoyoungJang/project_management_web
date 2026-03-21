@@ -33,6 +33,7 @@ const els = {
   filterSummary: document.getElementById("gantt-filter-summary"),
   filterSelectAll: document.getElementById("gantt-filter-select-all"),
   filterClearAll: document.getElementById("gantt-filter-clear-all"),
+  sortSelect: document.getElementById("gantt-sort-select"),
 };
 
 const STAGE_COLORS = ["#0f6d66", "#2a6f97", "#c06c2c", "#7a4fb0", "#3b7a57", "#9b2226"];
@@ -46,6 +47,7 @@ let currentUser = null;
 let canEditTasks = false;
 let taskFilterMode = "all";
 let selectedTaskIds = new Set();
+let currentSort = "timeline";
 
 function parseTaskFilterSelection(raw) {
   const normalized = String(raw || "").trim();
@@ -64,6 +66,12 @@ function parseTaskFilterSelection(raw) {
 const initialTaskFilter = parseTaskFilterSelection(params.get("visible_tasks"));
 taskFilterMode = initialTaskFilter.mode;
 selectedTaskIds = initialTaskFilter.ids;
+currentSort = normalizeSortKey(params.get("sort_by"));
+
+function normalizeSortKey(raw) {
+  const key = String(raw || "timeline").trim();
+  return ["timeline", "manual", "start_date", "target_date", "title"].includes(key) ? key : "timeline";
+}
 
 function parseLocalDate(value) {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return null;
@@ -296,6 +304,17 @@ function syncTaskFilterToUrl() {
   window.history.replaceState(null, "", `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`);
 }
 
+function syncSortToUrl() {
+  const nextParams = new URLSearchParams(window.location.search);
+  if (currentSort === "timeline") {
+    nextParams.delete("sort_by");
+  } else {
+    nextParams.set("sort_by", currentSort);
+  }
+  const nextQuery = nextParams.toString();
+  window.history.replaceState(null, "", `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`);
+}
+
 function syncTaskFilterSelection(items = checklistItems) {
   const availableIds = new Set(items.map((item) => Number(item.id)));
   if (taskFilterMode === "all") {
@@ -331,11 +350,42 @@ function stageOrderIndex(stageKey) {
   );
 }
 
-function getFilterableChecklistItems() {
-  return [...checklistItems].sort((a, b) => {
-    const stageGap = stageOrderIndex(a.stage) - stageOrderIndex(b.stage);
-    return stageGap || Number(a.position || 0) - Number(b.position || 0) || Number(a.id) - Number(b.id);
+function compareManualOrder(a, b, stageOrder) {
+  return (
+    (stageOrder.get(a.stage) ?? 999) - (stageOrder.get(b.stage) ?? 999) ||
+    Number(a.position || 0) - Number(b.position || 0) ||
+    Number(a.id) - Number(b.id)
+  );
+}
+
+function compareChecklistItems(a, b, stageOrder) {
+  const manualGap = compareManualOrder(a, b, stageOrder);
+  const startA = a.ganttRange ? a.ganttRange.start.getTime() : Number.POSITIVE_INFINITY;
+  const startB = b.ganttRange ? b.ganttRange.start.getTime() : Number.POSITIVE_INFINITY;
+  const targetA = a.ganttRange ? a.ganttRange.end.getTime() : Number.POSITIVE_INFINITY;
+  const targetB = b.ganttRange ? b.ganttRange.end.getTime() : Number.POSITIVE_INFINITY;
+  const titleGap = String(a.content || "").localeCompare(String(b.content || ""), "ko", {
+    sensitivity: "base",
   });
+
+  switch (currentSort) {
+    case "manual":
+      return manualGap;
+    case "start_date":
+      return startA - startB || targetA - targetB || manualGap;
+    case "target_date":
+      return targetA - targetB || startA - startB || manualGap;
+    case "title":
+      return titleGap || targetA - targetB || manualGap;
+    case "timeline":
+    default:
+      return targetA - targetB || startA - startB || manualGap;
+  }
+}
+
+function getFilterableChecklistItems() {
+  const today = parseLocalDate(toDateKey(new Date()));
+  return normalizeItems(today, checklistItems);
 }
 
 function renderTaskFilterPanel() {
@@ -441,18 +491,7 @@ function normalizeItems(today, items = checklistItems) {
   const stageOrder = new Map(projectStages.map((stage, idx) => [stage.stage_key, idx]));
   return [...items]
     .map((item) => ({ ...item, ganttRange: resolveItemRange(item, today) }))
-    .sort((a, b) => {
-      const endA = a.ganttRange ? a.ganttRange.end.getTime() : Number.POSITIVE_INFINITY;
-      const endB = b.ganttRange ? b.ganttRange.end.getTime() : Number.POSITIVE_INFINITY;
-      const startA = a.ganttRange ? a.ganttRange.start.getTime() : Number.POSITIVE_INFINITY;
-      const startB = b.ganttRange ? b.ganttRange.start.getTime() : Number.POSITIVE_INFINITY;
-      return (
-        endA - endB ||
-        startA - startB ||
-        (stageOrder.get(a.stage) ?? 999) - (stageOrder.get(b.stage) ?? 999) ||
-        Number(a.position || 0) - Number(b.position || 0)
-      );
-    });
+    .sort((a, b) => compareChecklistItems(a, b, stageOrder));
 }
 
 function getAutoTimelineRange(scheduledItems, dueDate, today) {
@@ -1185,6 +1224,7 @@ async function loadProjectData() {
   canEditTasks = Boolean(currentUser?.is_admin || project.owner === currentUser?.username);
   projectTitle = project.name || "프로젝트";
   syncTaskFilterSelection(checklistItems);
+  if (els.sortSelect) els.sortSelect.value = currentSort;
   renderTaskFilterPanel();
 
   els.title.textContent = `${projectTitle} - 간트 차트`;
@@ -1242,6 +1282,13 @@ els.filterClearAll?.addEventListener("click", () => {
   taskFilterMode = "none";
   selectedTaskIds = new Set();
   syncTaskFilterToUrl();
+  renderTaskFilterPanel();
+  renderGanttChart();
+});
+
+els.sortSelect?.addEventListener("change", (e) => {
+  currentSort = normalizeSortKey(e.target.value);
+  syncSortToUrl();
   renderTaskFilterPanel();
   renderGanttChart();
 });

@@ -1169,6 +1169,23 @@ button:active {
   flex-wrap: wrap;
 }
 
+.gantt-filter-panel__sort {
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+}
+
+.gantt-filter-panel__sort select {
+  min-height: 34px;
+  border-radius: 12px;
+  border: 1px solid #d8e4f0;
+  background: rgba(255, 255, 255, 0.92);
+  color: #27435f;
+  font-size: 0.88rem;
+  font-weight: 700;
+  padding: 0 12px;
+}
+
 .gantt-filter-panel__action {
   min-height: 34px;
   padding: 0 12px;
@@ -1913,6 +1930,10 @@ details.item[open] > .admin-user-summary {
   }
 
   .gantt-filter-panel .actions {
+    width: 100%;
+  }
+
+  .gantt-filter-panel__sort {
     width: 100%;
   }
 

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>프로젝트 간트 차트</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260321_11" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260321_12" />
   </head>
   <body class="page-gantt">
     <header class="hero hero--gantt">
@@ -79,6 +79,16 @@
                 <strong>보고 싶은 작업만 선택</strong>
               </div>
               <div class="actions">
+                <label class="gantt-filter-panel__sort">
+                  <span class="item__meta">정렬</span>
+                  <select id="gantt-sort-select">
+                    <option value="timeline">타임라인 순</option>
+                    <option value="manual">기본 순번</option>
+                    <option value="start_date">시작일 빠른순</option>
+                    <option value="target_date">목표일 빠른순</option>
+                    <option value="title">작업명 순</option>
+                  </select>
+                </label>
                 <button id="gantt-filter-select-all" class="gantt-filter-panel__action" type="button">전체 선택</button>
                 <button id="gantt-filter-clear-all" class="gantt-filter-panel__action" type="button">전체 해제</button>
               </div>
@@ -125,6 +135,8 @@
           if (projectId) nextParams.set("project_id", projectId);
           const visibleTasks = currentParams.get("visible_tasks");
           if (visibleTasks) nextParams.set("visible_tasks", visibleTasks);
+          const sortBy = currentParams.get("sort_by");
+          if (sortBy) nextParams.set("sort_by", sortBy);
           if (withRange) {
             if (startInput?.value) nextParams.set("timeline_start", startInput.value);
             if (endInput?.value) nextParams.set("timeline_end", endInput.value);
@@ -172,6 +184,6 @@
       })();
     </script>
     <script src="/static/common.js?v=20260319_3"></script>
-    <script src="/static/project_gantt.js?v=20260321_11"></script>
+    <script src="/static/project_gantt.js?v=20260321_12"></script>
   </body>
 </html>
