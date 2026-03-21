@@ -4,11 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>프로젝트 간트 차트</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260321_11" />
   </head>
-  <body>
-    <header class="hero">
-      <div class="hero__inner">
+  <body class="page-gantt">
+    <header class="hero hero--gantt">
+      <div class="hero__inner hero__inner--gantt">
+        <div class="gantt-hero__orb gantt-hero__orb--one" aria-hidden="true"></div>
+        <div class="gantt-hero__orb gantt-hero__orb--two" aria-hidden="true"></div>
         <div class="topbar">
           <div class="actions">
             <a class="btn-link" href="/">프로젝트 목록</a>
@@ -21,57 +23,84 @@
             <button id="logout-btn" type="button">로그아웃</button>
           </div>
         </div>
-        <h1 id="project-title">프로젝트 간트 차트</h1>
-        <p id="project-subtitle">시작일과 목표일 기준으로 프로젝트 일정을 한눈에 확인합니다.</p>
+        <div class="gantt-hero__copy">
+          <div class="gantt-hero__eyebrow">Timeline Workspace</div>
+          <h1 id="project-title">프로젝트 간트 차트</h1>
+          <p id="project-subtitle">시작일과 목표일을 기준으로 프로젝트 일정을 한 화면에서 확인합니다.</p>
+        </div>
       </div>
     </header>
 
-    <main class="layout">
-      <section class="cards">
-        <article class="card">
+    <main class="layout layout--gantt">
+      <section class="cards cards--gantt">
+        <article class="card card--gantt-stat">
           <h3>프로젝트 마감일</h3>
           <p id="gantt-project-due">-</p>
         </article>
-        <article class="card">
+        <article class="card card--gantt-stat">
           <h3>범위 표시 작업</h3>
           <p id="gantt-scheduled-count">0</p>
         </article>
-        <article class="card">
+        <article class="card card--gantt-stat">
           <h3>범위 미표시 작업</h3>
           <p id="gantt-unscheduled-count">0</p>
         </article>
-        <article class="card">
-          <h3>타임라인 범위</h3>
+        <article class="card card--gantt-stat">
+          <h3>현재 타임라인</h3>
           <p id="gantt-range-label">-</p>
         </article>
       </section>
 
-      <section class="panel">
+      <section class="panel gantt-panel">
         <div class="panel__header gantt-panel__header">
           <div>
             <h2>프로젝트 간트 차트</h2>
-            <p class="item__meta">각 작업의 시작일과 목표일을 기준으로 일정 범위를 표시합니다.</p>
+            <p class="item__meta">작업 기간과 마감 기준선을 함께 보면서 일정 간격과 집중 구간을 읽을 수 있습니다.</p>
           </div>
           <div id="gantt-legend" class="actions gantt-legend"></div>
         </div>
-        <form id="gantt-range-form" class="inline-row gantt-controls">
-          <label class="project-item-editor__field gantt-controls__field">
-            <span class="item__meta">시작</span>
-            <input id="gantt-range-start" name="timeline_start" type="date" />
-          </label>
-          <label class="project-item-editor__field gantt-controls__field">
-            <span class="item__meta">종료</span>
-            <input id="gantt-range-end" name="timeline_end" type="date" />
-          </label>
-          <button id="gantt-range-apply" type="button">범위 적용</button>
-          <button id="gantt-range-reset" type="button">자동 범위</button>
-        </form>
-        <div id="gantt-empty" class="item hidden">표시할 일정이 없습니다.</div>
-        <div id="gantt-scroll" class="gantt-scroll hidden"></div>
+
+        <div class="gantt-toolbar">
+          <form id="gantt-range-form" class="inline-row gantt-controls">
+            <label class="project-item-editor__field gantt-controls__field">
+              <span class="item__meta">시작</span>
+              <input id="gantt-range-start" name="timeline_start" type="date" />
+            </label>
+            <label class="project-item-editor__field gantt-controls__field">
+              <span class="item__meta">종료</span>
+              <input id="gantt-range-end" name="timeline_end" type="date" />
+            </label>
+            <button id="gantt-range-reset" type="button">자동 범위</button>
+          </form>
+          <section class="gantt-filter-panel">
+            <div class="gantt-filter-panel__header">
+              <div>
+                <div class="gantt-filter-panel__eyebrow">작업 필터</div>
+                <strong>보고 싶은 작업만 선택</strong>
+              </div>
+              <div class="actions">
+                <button id="gantt-filter-select-all" class="gantt-filter-panel__action" type="button">전체 선택</button>
+                <button id="gantt-filter-clear-all" class="gantt-filter-panel__action" type="button">전체 해제</button>
+              </div>
+            </div>
+            <div id="gantt-filter-summary" class="item__meta gantt-filter-panel__summary">전체 작업 표시 중</div>
+            <div id="gantt-filter-list" class="gantt-filter-list"></div>
+          </section>
+        </div>
+
+        <div class="gantt-surface">
+          <div id="gantt-empty" class="item gantt-empty hidden">표시할 일정이 없습니다.</div>
+          <div id="gantt-scroll" class="gantt-scroll hidden"></div>
+        </div>
       </section>
 
-      <section class="panel">
-        <h2>범위 미표시 작업</h2>
+      <section class="panel gantt-panel gantt-panel--secondary">
+        <div class="panel__header">
+          <div>
+            <h2>범위 미표시 작업</h2>
+            <p class="item__meta">목표일이 없는 작업은 아래 카드로 따로 모아서 확인합니다.</p>
+          </div>
+        </div>
         <div id="gantt-unscheduled-list" class="list"></div>
       </section>
     </main>
@@ -83,15 +112,19 @@
         const form = document.getElementById("gantt-range-form");
         const startInput = document.getElementById("gantt-range-start");
         const endInput = document.getElementById("gantt-range-end");
-        const applyBtn = document.getElementById("gantt-range-apply");
         const resetBtn = document.getElementById("gantt-range-reset");
+        const initialStartParam = pageParams.get("timeline_start") || "";
+        const initialEndParam = pageParams.get("timeline_end") || "";
 
-        if (startInput && pageParams.get("timeline_start")) startInput.value = pageParams.get("timeline_start");
-        if (endInput && pageParams.get("timeline_end")) endInput.value = pageParams.get("timeline_end");
+        if (startInput && initialStartParam) startInput.value = initialStartParam;
+        if (endInput && initialEndParam) endInput.value = initialEndParam;
 
         function buildUrl(withRange) {
           const nextParams = new URLSearchParams();
+          const currentParams = new URLSearchParams(window.location.search);
           if (projectId) nextParams.set("project_id", projectId);
+          const visibleTasks = currentParams.get("visible_tasks");
+          if (visibleTasks) nextParams.set("visible_tasks", visibleTasks);
           if (withRange) {
             if (startInput?.value) nextParams.set("timeline_start", startInput.value);
             if (endInput?.value) nextParams.set("timeline_end", endInput.value);
@@ -107,7 +140,7 @@
             return;
           }
           if (start > end) {
-            alert("시작일은 종료일보다 늦을 수 없습니다.");
+            alert("시작일이 종료일보다 늦을 수 없습니다.");
             return;
           }
           window.location.href = buildUrl(true);
@@ -118,13 +151,27 @@
           applyRange();
         });
 
-        applyBtn?.addEventListener("click", applyRange);
+        function maybeApplyEditedRange() {
+          const start = String(startInput?.value || "");
+          const end = String(endInput?.value || "");
+          if (!start || !end) return;
+          if (start === initialStartParam && end === initialEndParam) return;
+          applyRange();
+        }
+
+        startInput?.addEventListener("change", maybeApplyEditedRange);
+        endInput?.addEventListener("change", () => {
+          window.setTimeout(() => {
+            if (startInput?.value && endInput?.value) maybeApplyEditedRange();
+          }, 0);
+        });
+
         resetBtn?.addEventListener("click", () => {
           window.location.href = buildUrl(false);
         });
       })();
     </script>
     <script src="/static/common.js?v=20260319_3"></script>
-    <script src="/static/project_gantt.js?v=20260319_16"></script>
+    <script src="/static/project_gantt.js?v=20260321_11"></script>
   </body>
 </html>

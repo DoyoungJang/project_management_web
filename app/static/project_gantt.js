@@ -29,6 +29,10 @@ const els = {
   rangeStart: document.getElementById("gantt-range-start"),
   rangeEnd: document.getElementById("gantt-range-end"),
   rangeReset: document.getElementById("gantt-range-reset"),
+  filterList: document.getElementById("gantt-filter-list"),
+  filterSummary: document.getElementById("gantt-filter-summary"),
+  filterSelectAll: document.getElementById("gantt-filter-select-all"),
+  filterClearAll: document.getElementById("gantt-filter-clear-all"),
 };
 
 const STAGE_COLORS = ["#0f6d66", "#2a6f97", "#c06c2c", "#7a4fb0", "#3b7a57", "#9b2226"];
@@ -40,6 +44,26 @@ let projectTitle = "프로젝트";
 let manualTimelineRange = null;
 let currentUser = null;
 let canEditTasks = false;
+let taskFilterMode = "all";
+let selectedTaskIds = new Set();
+
+function parseTaskFilterSelection(raw) {
+  const normalized = String(raw || "").trim();
+  if (!normalized) return { mode: "all", ids: new Set() };
+  if (normalized === "none") return { mode: "none", ids: new Set() };
+  const ids = new Set(
+    normalized
+      .split(",")
+      .map((value) => Number(value.trim()))
+      .filter((value) => Number.isFinite(value) && value > 0)
+  );
+  if (!ids.size) return { mode: "all", ids: new Set() };
+  return { mode: "custom", ids };
+}
+
+const initialTaskFilter = parseTaskFilterSelection(params.get("visible_tasks"));
+taskFilterMode = initialTaskFilter.mode;
+selectedTaskIds = initialTaskFilter.ids;
 
 function parseLocalDate(value) {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return null;
@@ -258,6 +282,104 @@ function syncTimelineRangeToUrl(range) {
   window.history.replaceState(null, "", `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`);
 }
 
+function syncTaskFilterToUrl() {
+  const nextParams = new URLSearchParams(window.location.search);
+  if (taskFilterMode === "all") {
+    nextParams.delete("visible_tasks");
+  } else if (taskFilterMode === "none") {
+    nextParams.set("visible_tasks", "none");
+  } else {
+    const serialized = [...selectedTaskIds].sort((a, b) => a - b).join(",");
+    nextParams.set("visible_tasks", serialized);
+  }
+  const nextQuery = nextParams.toString();
+  window.history.replaceState(null, "", `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`);
+}
+
+function syncTaskFilterSelection(items = checklistItems) {
+  const availableIds = new Set(items.map((item) => Number(item.id)));
+  if (taskFilterMode === "all") {
+    selectedTaskIds = new Set(availableIds);
+    return;
+  }
+  selectedTaskIds = new Set([...selectedTaskIds].filter((id) => availableIds.has(id)));
+  if (taskFilterMode === "custom") {
+    if (selectedTaskIds.size === 0) {
+      taskFilterMode = "none";
+    } else if (selectedTaskIds.size === availableIds.size) {
+      taskFilterMode = "all";
+    }
+  }
+}
+
+function isChecklistVisible(item) {
+  const itemId = Number(item.id);
+  if (taskFilterMode === "all") return true;
+  if (taskFilterMode === "none") return false;
+  return selectedTaskIds.has(itemId);
+}
+
+function formatTaskCount(visibleCount, totalCount) {
+  if (taskFilterMode === "all") return String(totalCount);
+  return `${visibleCount} / ${totalCount}`;
+}
+
+function stageOrderIndex(stageKey) {
+  return Math.max(
+    0,
+    projectStages.findIndex((stage) => stage.stage_key === stageKey)
+  );
+}
+
+function getFilterableChecklistItems() {
+  return [...checklistItems].sort((a, b) => {
+    const stageGap = stageOrderIndex(a.stage) - stageOrderIndex(b.stage);
+    return stageGap || Number(a.position || 0) - Number(b.position || 0) || Number(a.id) - Number(b.id);
+  });
+}
+
+function renderTaskFilterPanel() {
+  if (!els.filterList || !els.filterSummary) return;
+
+  const items = getFilterableChecklistItems();
+  syncTaskFilterSelection(items);
+
+  if (!items.length) {
+    els.filterSummary.textContent = "선택할 작업이 없습니다.";
+    els.filterList.innerHTML = "<div class='gantt-filter-empty'>작업이 없습니다.</div>";
+    return;
+  }
+
+  const selectedCount = taskFilterMode === "all" ? items.length : selectedTaskIds.size;
+  els.filterSummary.textContent =
+    taskFilterMode === "all"
+      ? `전체 ${items.length}개 작업 표시 중`
+      : taskFilterMode === "none"
+        ? `선택된 작업 없음 · 전체 ${items.length}개`
+        : `${selectedCount}개 선택 / 전체 ${items.length}개`;
+
+  els.filterList.innerHTML = items
+    .map((item) => {
+      const checked = taskFilterMode === "all" ? true : selectedTaskIds.has(Number(item.id));
+      const stageName = stageLabel(item.stage);
+      return `
+        <label class="gantt-filter-item">
+          <input type="checkbox" data-task-filter-id="${item.id}" ${checked ? "checked" : ""} />
+          <span class="gantt-filter-item__body">
+            <span class="gantt-filter-item__top">
+              <span class="gantt-filter-item__stage" style="background:${stageColor(item.stage)}18; color:${stageColor(item.stage)}; border-color:${stageColor(item.stage)}33;">
+                ${escapeHtml(stageName)}
+              </span>
+              ${item.target_date ? `<span class="gantt-filter-item__date">${escapeHtml(item.target_date)}</span>` : ""}
+            </span>
+            <span class="gantt-filter-item__title">${escapeHtml(item.content || "작업")}</span>
+          </span>
+        </label>
+      `;
+    })
+    .join("");
+}
+
 function findChecklistItem(checklistId) {
   return checklistItems.find((item) => Number(item.id) === Number(checklistId));
 }
@@ -315,9 +437,9 @@ function resolveItemRange(item, today) {
   };
 }
 
-function normalizeItems(today) {
+function normalizeItems(today, items = checklistItems) {
   const stageOrder = new Map(projectStages.map((stage, idx) => [stage.stage_key, idx]));
-  return [...checklistItems]
+  return [...items]
     .map((item) => ({ ...item, ganttRange: resolveItemRange(item, today) }))
     .sort((a, b) => {
       const endA = a.ganttRange ? a.ganttRange.end.getTime() : Number.POSITIVE_INFINITY;
@@ -444,16 +566,17 @@ function buildMarkerHtml(todayIndex, dueIndex) {
   `;
 }
 
-function renderScheduledRows({ scheduledItems, days, dayIndexMap, todayIndex, dueIndex, styleVars, labelWidth }) {
+function renderScheduledRows({ scheduledItems, dayIndexMap, todayIndex, dueIndex, styleVars, labelWidth, headerMode, trackBandsHtml }) {
   if (!scheduledItems.length) {
     return `
-      <div class="gantt-row" style="grid-template-columns:${labelWidth}px auto;">
-        <div class="gantt-label">
+      <div class="gantt-row gantt-row--empty" style="grid-template-columns:${labelWidth}px auto;">
+        <div class="gantt-label gantt-label--card gantt-label--empty">
           <strong>선택한 범위에 표시할 작업이 없습니다.</strong>
-          <div class="item__meta">범위를 조정하면 간트 차트가 즉시 다시 그려집니다.</div>
+          <div class="item__meta">범위를 조정하면 차트가 해당 기간에 맞게 다시 배치됩니다.</div>
         </div>
-        <div class="gantt-track-wrap">
-          <div class="gantt-track" style="${styleVars}">
+        <div class="gantt-track-shell">
+          <div class="gantt-track ${headerMode !== "day" ? "gantt-track--overview" : ""}" style="${styleVars}">
+            ${headerMode !== "day" ? trackBandsHtml : ""}
             ${buildMarkerHtml(todayIndex, dueIndex)}
           </div>
         </div>
@@ -471,16 +594,25 @@ function renderScheduledRows({ scheduledItems, days, dayIndexMap, todayIndex, du
       const stageName = stageLabel(item.stage);
       const color = stageColor(item.stage);
       const span = Math.max(1, endIndex - startIndex + 1);
+      const durationLabel = `${getInclusiveDaySpan(range.start, range.end)}d`;
       return `
-        <div class="gantt-row" style="grid-template-columns:${labelWidth}px auto;">
-          <div class="gantt-label">
-            <strong>${escapeHtml(item.content)}</strong>
-            <div class="item__meta">
-              ${escapeHtml(stageName)} | 시작일: ${escapeHtml(range.startLabel)} | 목표일: ${escapeHtml(range.targetLabel)}
+        <div class="gantt-row gantt-row--task" style="grid-template-columns:${labelWidth}px auto;">
+          <div class="gantt-label gantt-label--card">
+            <div class="gantt-label__top">
+              <span class="gantt-stage-pill" style="background:${color}18; color:${color}; border-color:${color}33;">
+                ${escapeHtml(stageName)}
+              </span>
+              <span class="gantt-duration-pill">${durationLabel}</span>
+            </div>
+            <strong class="gantt-task-title">${escapeHtml(item.content)}</strong>
+            <div class="gantt-date-pills">
+              <span class="gantt-date-pill">시작 ${escapeHtml(range.startLabel)}</span>
+              <span class="gantt-date-pill">목표 ${escapeHtml(range.targetLabel)}</span>
             </div>
           </div>
-          <div class="gantt-track-wrap">
-            <div class="gantt-track" style="${styleVars}">
+          <div class="gantt-track-shell">
+            <div class="gantt-track ${headerMode !== "day" ? "gantt-track--overview" : ""}" style="${styleVars}">
+              ${headerMode !== "day" ? trackBandsHtml : ""}
               ${buildMarkerHtml(todayIndex, dueIndex)}
               <button
                 type="button"
@@ -490,7 +622,8 @@ function renderScheduledRows({ scheduledItems, days, dayIndexMap, todayIndex, du
                 title="${escapeHtml(item.content)}"
                 aria-label="${escapeHtml(item.content)} 설명 보기"
               >
-                ${escapeHtml(item.content)}
+                <span class="gantt-bar__title">${escapeHtml(item.content)}</span>
+                ${span >= 4 ? `<span class="gantt-bar__duration">${durationLabel}</span>` : ""}
               </button>
             </div>
           </div>
@@ -502,22 +635,457 @@ function renderScheduledRows({ scheduledItems, days, dayIndexMap, todayIndex, du
 
 function renderGanttChart() {
   const today = parseLocalDate(toDateKey(new Date()));
-  const sortedItems = normalizeItems(today);
+  const allSortedItems = normalizeItems(today, checklistItems);
+  const filteredSourceItems = checklistItems.filter((item) => isChecklistVisible(item));
+  const sortedItems = normalizeItems(today, filteredSourceItems);
+  const allScheduledCount = allSortedItems.filter((item) => item.ganttRange).length;
+  const allUnscheduledCount = allSortedItems.filter((item) => !item.ganttRange).length;
   const scheduledItems = sortedItems.filter((item) => item.ganttRange);
   const unscheduledItems = sortedItems.filter((item) => !item.ganttRange);
   const dueDate = parseLocalDate(currentProject?.due_date);
-  const autoRange = getAutoTimelineRange(scheduledItems, dueDate, today);
+  const autoRange = filteredSourceItems.length ? getAutoTimelineRange(scheduledItems, dueDate, today) : null;
 
   if (els.projectDue) els.projectDue.textContent = currentProject?.due_date || "-";
-  if (els.scheduledCount) els.scheduledCount.textContent = String(scheduledItems.length);
-  if (els.unscheduledCount) els.unscheduledCount.textContent = String(unscheduledItems.length);
+  if (els.scheduledCount) els.scheduledCount.textContent = formatTaskCount(scheduledItems.length, allScheduledCount);
+  if (els.unscheduledCount) els.unscheduledCount.textContent = formatTaskCount(unscheduledItems.length, allUnscheduledCount);
 
   renderLegend();
   renderUnscheduledItems(unscheduledItems);
 
   if (!autoRange) {
     syncTimelineInputs(manualTimelineRange);
-    els.rangeLabel.textContent = "-";
+    els.rangeLabel.textContent = manualTimelineRange ? formatRange(manualTimelineRange.start, manualTimelineRange.end) : "-";
+    if (els.empty) {
+      els.empty.textContent = filteredSourceItems.length ? "표시할 일정이 없습니다." : "체크박스로 표시할 작업을 선택해 주세요.";
+    }
+    els.empty.classList.remove("hidden");
+    els.scroll.classList.add("hidden");
+    els.scroll.innerHTML = "";
+    return;
+  }
+
+  const appliedRange = manualTimelineRange || autoRange;
+  syncTimelineInputs(appliedRange);
+
+  const visibleScheduledItems = scheduledItems
+    .filter((item) => rangesIntersect(item.ganttRange.start, item.ganttRange.end, appliedRange.start, appliedRange.end))
+    .map((item) => ({
+      ...item,
+      visibleRange: {
+        start: clampDate(item.ganttRange.start, appliedRange.start, appliedRange.end),
+        end: clampDate(item.ganttRange.end, appliedRange.start, appliedRange.end),
+      },
+    }));
+
+  els.empty.classList.add("hidden");
+  els.scroll.classList.remove("hidden");
+
+  const days = buildTimelineDays(appliedRange.start, appliedRange.end);
+  const dayIndexMap = new Map(days.map((day, idx) => [toDateKey(day), idx]));
+  const todayIndex = today ? dayIndexMap.get(toDateKey(today)) : null;
+  const dueIndex = dueDate ? dayIndexMap.get(toDateKey(dueDate)) : null;
+  const metrics = getTimelineMetrics(days.length);
+  const styleVars = `--gantt-days:${days.length}; --gantt-cell-width:${metrics.cellWidth}px;`;
+  const headerConfig = getTimelineHeaderConfig(days, metrics);
+  const headerLabelsHtml = buildTimelineHeaderLabels(days, headerConfig, metrics.cellWidth);
+  const monthBandsHtml = buildTimelineMonthBands(days);
+  const trackBandsHtml = buildTimelineTrackBands(days);
+
+  els.rangeLabel.textContent = formatRange(appliedRange.start, appliedRange.end);
+  els.empty.classList.add("hidden");
+  els.scroll.classList.remove("hidden");
+
+  const headerHtml = `
+    <div class="gantt-row gantt-row--header" style="grid-template-columns:${metrics.labelWidth}px auto;">
+      <div class="gantt-label gantt-label--header-card">
+        <span class="gantt-label__eyebrow">Task Lane</span>
+        <strong>작업</strong>
+      </div>
+      <div class="gantt-track-shell gantt-track-shell--header">
+        <div class="gantt-days ${headerConfig.mode !== "day" ? "gantt-days--condensed gantt-days--overview" : ""}" style="${styleVars}">
+          ${monthBandsHtml}
+          ${days
+            .map((day, index) => {
+              const classes = [
+                "gantt-day",
+                day.getDay() === 0 || day.getDay() === 6 ? "is-weekend" : "",
+                day.getDay() === 1 ? "is-week-start" : "",
+                day.getDate() === 1 ? "is-month-start" : "",
+                headerConfig.mode === "day" ? "is-day-mode" : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              return `<div class="${classes}" title="${toDateKey(day)}">${
+                headerConfig.mode === "day" ? renderTimelineDayCell(day, index, days, headerConfig) : ""
+              }</div>`;
+            })
+            .join("")}
+          ${headerLabelsHtml ? `<div class="gantt-header-labels">${headerLabelsHtml}</div>` : ""}
+        </div>
+      </div>
+    </div>
+  `;
+
+  const rowsHtml = renderScheduledRows({
+    scheduledItems: visibleScheduledItems,
+    dayIndexMap,
+    todayIndex,
+    dueIndex,
+    styleVars,
+    labelWidth: metrics.labelWidth,
+    headerMode: headerConfig.mode,
+    trackBandsHtml,
+  });
+
+  els.scroll.innerHTML = `<div class="gantt-board">${headerHtml}${rowsHtml}</div>`;
+}
+
+function getTimelineMetrics(dayCount) {
+  const labelWidth = window.innerWidth <= 900 ? 220 : 320;
+  const surface = els.scroll?.closest(".gantt-surface") || els.scroll?.parentElement || els.scroll;
+  const surfaceWidth = Math.max(360, Math.floor(surface?.getBoundingClientRect().width || window.innerWidth - 96));
+  const surfacePadding = 32;
+  const rowGap = 14;
+  const trackWidth = Math.max(220, surfaceWidth - surfacePadding - labelWidth - rowGap);
+  const minCellWidth = dayCount > 365 ? 0.55 : dayCount > 180 ? 0.8 : 1.2;
+  const cellWidth = clampNumber(trackWidth / Math.max(dayCount, 1), minCellWidth, 42);
+  const approxLabelWidth = 72;
+  const maxLabels = Math.max(4, Math.floor(trackWidth / approxLabelWidth));
+  const labelStep = Math.max(1, Math.ceil(dayCount / maxLabels));
+  return {
+    labelWidth,
+    trackWidth,
+    cellWidth,
+    labelStep,
+  };
+}
+
+function renderLegend() {
+  if (!els.legend) return;
+
+  const stageLegend = projectStages
+    .map(
+      (stage) => `
+        <span class="gantt-legend__item">
+          <span class="gantt-legend__swatch" style="background:${stageColor(stage.stage_key)}"></span>
+          ${escapeHtml(stage.stage_name)}
+        </span>
+      `
+    )
+    .join("");
+
+  const markerLegend = `
+    <span class="gantt-legend__item gantt-legend__item--marker">
+      <span class="gantt-legend__swatch" style="background:#0f6d66"></span>
+      오늘
+    </span>
+    <span class="gantt-legend__item gantt-legend__item--marker">
+      <span class="gantt-legend__swatch" style="background:#c0362c"></span>
+      프로젝트 마감
+    </span>
+  `;
+
+  els.legend.innerHTML = `${stageLegend}${markerLegend}`;
+}
+
+function renderUnscheduledItems(items) {
+  if (!els.unscheduledList) return;
+
+  if (!items.length) {
+    els.unscheduledList.innerHTML = "<div class='item gantt-unscheduled-card'>범위 미표시 작업이 없습니다.</div>";
+    return;
+  }
+
+  els.unscheduledList.innerHTML = items
+    .map(
+      (item) => `
+        <article class="item gantt-unscheduled-card">
+          <div class="gantt-unscheduled-card__top">
+            <div class="gantt-unscheduled-card__copy">
+              <button
+                type="button"
+                class="task-detail-trigger gantt-unscheduled-card__title"
+                data-open-gantt-description="${item.id}"
+              >
+                ${escapeHtml(item.content)}
+              </button>
+              <div class="gantt-date-pills gantt-date-pills--compact">
+                <span class="gantt-date-pill">시작 ${escapeHtml(item.start_date || "-")}</span>
+                <span class="gantt-date-pill gantt-date-pill--muted">목표일 없음</span>
+              </div>
+            </div>
+            <span
+              class="gantt-stage-pill"
+              style="background:${stageColor(item.stage)}18; color:${stageColor(item.stage)}; border-color:${stageColor(item.stage)}33;"
+            >
+              ${escapeHtml(stageLabel(item.stage))}
+            </span>
+          </div>
+          <div class="gantt-unscheduled-card__body">${escapeHtml(item.description || "설명 없음")}</div>
+        </article>
+      `
+    )
+    .join("");
+}
+
+function getInclusiveDaySpan(start, end) {
+  return Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
+}
+
+function formatTimelineWeekdayLabel(date) {
+  return new Intl.DateTimeFormat("ko-KR", { weekday: "short" }).format(date);
+}
+
+function formatTimelineMonthBandLabel(date, forceYear = false) {
+  if (forceYear) return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}`;
+  return `${date.getMonth() + 1}월`;
+}
+
+function buildTimelineMonthBands(days) {
+  if (!days.length) return "";
+
+  const bands = [];
+  let startIndex = 0;
+
+  for (let index = 1; index <= days.length; index += 1) {
+    const current = days[index];
+    const previous = days[index - 1];
+    const crossedMonth =
+      index === days.length ||
+      current.getMonth() !== previous.getMonth() ||
+      current.getFullYear() !== previous.getFullYear();
+
+    if (!crossedMonth) continue;
+
+    const startDay = days[startIndex];
+    bands.push({
+      startIndex,
+      span: index - startIndex,
+      yearStart: startDay.getMonth() === 0,
+    });
+    startIndex = index;
+  }
+
+  return `
+    <div class="gantt-month-bands">
+      ${bands
+        .map(
+          (band) => `
+            <span
+              class="gantt-month-band ${band.yearStart ? "is-year-start" : ""}"
+              style="left:calc(${band.startIndex} * var(--gantt-cell-width)); width:calc(${band.span} * var(--gantt-cell-width));"
+            ></span>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function buildTimelineHeaderLabels(days, config, cellWidth = 12) {
+  if (config.mode === "day") return "";
+
+  const lastIndex = days.length - 1;
+  const startText = formatYearMonthLabel(days[0]);
+  const endText = formatYearMonthLabel(days[lastIndex]);
+  const minGapPx = config.mode === "year-month" ? 150 : 110;
+  const edgeGapPx = 84;
+
+  const rawLabels = days
+    .map((day, index) => ({
+      day,
+      index,
+      text: getTimelineLabel(day, index, days, config),
+      isYearBoundary: index === 0 || index === lastIndex || day.getMonth() === 0,
+    }))
+    .filter((entry) => entry.text && entry.index !== 0 && entry.index !== lastIndex);
+
+  const filtered = [];
+
+  for (const entry of rawLabels) {
+    const distanceFromStart = entry.index * cellWidth;
+    const distanceFromEnd = (lastIndex - entry.index) * cellWidth;
+    const previous = filtered[filtered.length - 1];
+    const gapFromPrevious = previous ? (entry.index - previous.index) * cellWidth : Number.POSITIVE_INFINITY;
+
+    if (distanceFromStart < edgeGapPx || distanceFromEnd < edgeGapPx) continue;
+    if (gapFromPrevious < minGapPx && !entry.isYearBoundary) continue;
+    if (previous?.isYearBoundary && gapFromPrevious < minGapPx * 0.8) continue;
+
+    filtered.push(entry);
+  }
+
+  const middleHtml = filtered
+    .map(
+      (entry) => `
+        <span
+          class="gantt-header-label ${entry.isYearBoundary ? "is-year-boundary" : ""}"
+          style="left:calc(${entry.index} * var(--gantt-cell-width));"
+          title="${toDateKey(entry.day)}"
+        >
+          ${escapeHtml(entry.text)}
+        </span>
+      `
+    )
+    .join("");
+
+  return `
+    <span class="gantt-header-label is-start" title="${toDateKey(days[0])}">
+      ${escapeHtml(startText)}
+    </span>
+    ${middleHtml}
+    <span class="gantt-header-label is-end" title="${toDateKey(days[lastIndex])}">
+      ${escapeHtml(endText)}
+    </span>
+  `;
+}
+
+function buildTimelineTrackBands(days) {
+  if (!days.length) return "";
+
+  const bands = [];
+  let startIndex = 0;
+
+  for (let index = 1; index <= days.length; index += 1) {
+    const current = days[index];
+    const previous = days[index - 1];
+    const crossedMonth =
+      index === days.length ||
+      current.getMonth() !== previous.getMonth() ||
+      current.getFullYear() !== previous.getFullYear();
+
+    if (!crossedMonth) continue;
+
+    const startDay = days[startIndex];
+    bands.push({
+      startIndex,
+      span: index - startIndex,
+      yearStart: startDay.getMonth() === 0,
+    });
+    startIndex = index;
+  }
+
+  return `
+    <div class="gantt-track-bands">
+      ${bands
+        .map(
+          (band, bandIndex) => `
+            <span
+              class="gantt-track-band ${band.yearStart ? "is-year-start" : ""} ${bandIndex % 2 === 0 ? "is-even" : "is-odd"}"
+              style="left:calc(${band.startIndex} * var(--gantt-cell-width)); width:calc(${band.span} * var(--gantt-cell-width));"
+            ></span>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderTimelineDayCell(day, index, days, config) {
+  const label = getTimelineLabel(day, index, days, config);
+  if (!label) return "";
+
+  const isBoundary = index === 0 || index === days.length - 1 || day.getDate() === 1;
+  const weekday = formatTimelineWeekdayLabel(day);
+
+  return `
+    <span class="gantt-day__date">${escapeHtml(label)}</span>
+    <span class="gantt-day__weekday${isBoundary ? " is-strong" : ""}">${escapeHtml(weekday)}</span>
+  `;
+}
+
+function renderScheduledRows({ scheduledItems, dayIndexMap, todayIndex, dueIndex, styleVars, labelWidth, headerMode, trackBandsHtml }) {
+  if (!scheduledItems.length) {
+    return `
+      <div class="gantt-row gantt-row--empty" style="grid-template-columns:${labelWidth}px auto;">
+        <div class="gantt-label gantt-label--card gantt-label--empty">
+          <strong>선택한 범위에 표시할 작업이 없습니다.</strong>
+          <div class="item__meta">범위를 조정하면 차트가 해당 기간에 맞게 다시 배치됩니다.</div>
+        </div>
+        <div class="gantt-track-shell">
+          <div class="gantt-track ${headerMode !== "day" ? "gantt-track--overview" : ""}" style="${styleVars}">
+            ${headerMode !== "day" ? trackBandsHtml : ""}
+            ${buildMarkerHtml(todayIndex, dueIndex)}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  return scheduledItems
+    .map((item) => {
+      const range = item.ganttRange;
+      const visibleStart = item.visibleRange?.start || range.start;
+      const visibleEnd = item.visibleRange?.end || range.end;
+      const startIndex = dayIndexMap.get(toDateKey(visibleStart));
+      const endIndex = dayIndexMap.get(toDateKey(visibleEnd));
+      const stageName = stageLabel(item.stage);
+      const color = stageColor(item.stage);
+      const span = Math.max(1, endIndex - startIndex + 1);
+      const durationLabel = `${getInclusiveDaySpan(range.start, range.end)}d`;
+      return `
+        <div class="gantt-row gantt-row--task" style="grid-template-columns:${labelWidth}px auto;">
+          <div class="gantt-label gantt-label--card">
+            <div class="gantt-label__top">
+              <span class="gantt-stage-pill" style="background:${color}18; color:${color}; border-color:${color}33;">
+                ${escapeHtml(stageName)}
+              </span>
+              <span class="gantt-duration-pill">${durationLabel}</span>
+            </div>
+            <strong class="gantt-task-title">${escapeHtml(item.content)}</strong>
+            <div class="gantt-date-pills">
+              <span class="gantt-date-pill">시작 ${escapeHtml(range.startLabel)}</span>
+              <span class="gantt-date-pill">목표 ${escapeHtml(range.targetLabel)}</span>
+            </div>
+          </div>
+          <div class="gantt-track-shell">
+            <div class="gantt-track ${headerMode !== "day" ? "gantt-track--overview" : ""}" style="${styleVars}">
+              ${headerMode !== "day" ? trackBandsHtml : ""}
+              ${buildMarkerHtml(todayIndex, dueIndex)}
+              <button
+                type="button"
+                class="gantt-bar"
+                data-open-gantt-description="${item.id}"
+                style="left:calc(${startIndex} * var(--gantt-cell-width)); width:calc(${span} * var(--gantt-cell-width) - 8px); background:${color};"
+                title="${escapeHtml(item.content)}"
+                aria-label="${escapeHtml(item.content)} 설명 보기"
+              >
+                <span class="gantt-bar__title">${escapeHtml(item.content)}</span>
+                ${span >= 4 ? `<span class="gantt-bar__duration">${durationLabel}</span>` : ""}
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderGanttChart() {
+  const today = parseLocalDate(toDateKey(new Date()));
+  const allSortedItems = normalizeItems(today, checklistItems);
+  const filteredSourceItems = checklistItems.filter((item) => isChecklistVisible(item));
+  const sortedItems = normalizeItems(today, filteredSourceItems);
+  const allScheduledCount = allSortedItems.filter((item) => item.ganttRange).length;
+  const allUnscheduledCount = allSortedItems.filter((item) => !item.ganttRange).length;
+  const scheduledItems = sortedItems.filter((item) => item.ganttRange);
+  const unscheduledItems = sortedItems.filter((item) => !item.ganttRange);
+  const dueDate = parseLocalDate(currentProject?.due_date);
+  const autoRange = filteredSourceItems.length ? getAutoTimelineRange(scheduledItems, dueDate, today) : null;
+
+  if (els.projectDue) els.projectDue.textContent = currentProject?.due_date || "-";
+  if (els.scheduledCount) els.scheduledCount.textContent = formatTaskCount(scheduledItems.length, allScheduledCount);
+  if (els.unscheduledCount) els.unscheduledCount.textContent = formatTaskCount(unscheduledItems.length, allUnscheduledCount);
+
+  renderLegend();
+  renderUnscheduledItems(unscheduledItems);
+
+  if (!autoRange) {
+    syncTimelineInputs(manualTimelineRange);
+    els.rangeLabel.textContent = manualTimelineRange ? formatRange(manualTimelineRange.start, manualTimelineRange.end) : "-";
+    if (els.empty) {
+      els.empty.textContent = filteredSourceItems.length ? "표시할 일정이 없습니다." : "체크박스로 표시할 작업을 선택해 주세요.";
+    }
     els.empty.classList.remove("hidden");
     els.scroll.classList.add("hidden");
     els.scroll.innerHTML = "";
@@ -544,7 +1112,9 @@ function renderGanttChart() {
   const metrics = getTimelineMetrics(days.length);
   const styleVars = `--gantt-days:${days.length}; --gantt-cell-width:${metrics.cellWidth}px;`;
   const headerConfig = getTimelineHeaderConfig(days, metrics);
-  const headerLabelsHtml = buildTimelineHeaderLabels(days, headerConfig);
+  const headerLabelsHtml = buildTimelineHeaderLabels(days, headerConfig, metrics.cellWidth);
+  const monthBandsHtml = buildTimelineMonthBands(days);
+  const trackBandsHtml = buildTimelineTrackBands(days);
 
   els.rangeLabel.textContent = formatRange(appliedRange.start, appliedRange.end);
   els.empty.classList.add("hidden");
@@ -552,20 +1122,26 @@ function renderGanttChart() {
 
   const headerHtml = `
     <div class="gantt-row gantt-row--header" style="grid-template-columns:${metrics.labelWidth}px auto;">
-      <div class="gantt-label gantt-label--header">작업</div>
-      <div class="gantt-track-wrap">
-        <div class="gantt-days ${headerConfig.mode !== "day" ? "gantt-days--condensed" : ""}" style="${styleVars}">
+      <div class="gantt-label gantt-label--header-card">
+        <span class="gantt-label__eyebrow">Task Lane</span>
+        <strong>작업</strong>
+      </div>
+      <div class="gantt-track-shell gantt-track-shell--header">
+        <div class="gantt-days ${headerConfig.mode !== "day" ? "gantt-days--condensed gantt-days--overview" : ""}" style="${styleVars}">
+          ${monthBandsHtml}
           ${days
             .map((day, index) => {
               const classes = [
                 "gantt-day",
+                day.getDay() === 0 || day.getDay() === 6 ? "is-weekend" : "",
                 day.getDay() === 1 ? "is-week-start" : "",
                 day.getDate() === 1 ? "is-month-start" : "",
+                headerConfig.mode === "day" ? "is-day-mode" : "",
               ]
                 .filter(Boolean)
                 .join(" ");
               return `<div class="${classes}" title="${toDateKey(day)}">${
-                headerConfig.mode === "day" ? getTimelineLabel(day, index, days, headerConfig) : ""
+                headerConfig.mode === "day" ? renderTimelineDayCell(day, index, days, headerConfig) : ""
               }</div>`;
             })
             .join("")}
@@ -577,12 +1153,13 @@ function renderGanttChart() {
 
   const rowsHtml = renderScheduledRows({
     scheduledItems: visibleScheduledItems,
-    days,
     dayIndexMap,
     todayIndex,
     dueIndex,
     styleVars,
     labelWidth: metrics.labelWidth,
+    headerMode: headerConfig.mode,
+    trackBandsHtml,
   });
 
   els.scroll.innerHTML = `<div class="gantt-board">${headerHtml}${rowsHtml}</div>`;
@@ -607,6 +1184,8 @@ async function loadProjectData() {
   checklistItems = Array.isArray(checklists) ? checklists : [];
   canEditTasks = Boolean(currentUser?.is_admin || project.owner === currentUser?.username);
   projectTitle = project.name || "프로젝트";
+  syncTaskFilterSelection(checklistItems);
+  renderTaskFilterPanel();
 
   els.title.textContent = `${projectTitle} - 간트 차트`;
   els.subtitle.textContent = `${projectTitle}의 시작일과 목표일 기준 일정을 확인합니다.`;
@@ -626,24 +1205,44 @@ els.unscheduledList?.addEventListener("click", (e) => {
   openChecklistDetails(detailBtn.getAttribute("data-open-gantt-description"));
 });
 
-els.rangeForm?.addEventListener("submit", (e) => {
-  e.preventDefault();
-  applyManualTimelineRange();
+els.filterList?.addEventListener("change", (e) => {
+  const checkbox = e.target.closest("[data-task-filter-id]");
+  if (!checkbox) return;
+  const itemId = Number(checkbox.getAttribute("data-task-filter-id"));
+  if (!Number.isFinite(itemId)) return;
+
+  if (checkbox.checked) {
+    selectedTaskIds.add(itemId);
+  } else {
+    selectedTaskIds.delete(itemId);
+  }
+
+  if (selectedTaskIds.size === 0) {
+    taskFilterMode = "none";
+  } else if (selectedTaskIds.size === checklistItems.length) {
+    taskFilterMode = "all";
+  } else {
+    taskFilterMode = "custom";
+  }
+
+  syncTaskFilterToUrl();
+  renderTaskFilterPanel();
+  renderGanttChart();
 });
 
-els.rangeStart?.addEventListener("change", () => {
-  if (!els.rangeStart?.value || !els.rangeEnd?.value) return;
-  applyManualTimelineRange();
+els.filterSelectAll?.addEventListener("click", () => {
+  taskFilterMode = "all";
+  syncTaskFilterSelection(checklistItems);
+  syncTaskFilterToUrl();
+  renderTaskFilterPanel();
+  renderGanttChart();
 });
 
-els.rangeEnd?.addEventListener("change", () => {
-  if (!els.rangeStart?.value || !els.rangeEnd?.value) return;
-  applyManualTimelineRange();
-});
-
-els.rangeReset?.addEventListener("click", () => {
-  manualTimelineRange = null;
-  syncTimelineRangeToUrl(null);
+els.filterClearAll?.addEventListener("click", () => {
+  taskFilterMode = "none";
+  selectedTaskIds = new Set();
+  syncTaskFilterToUrl();
+  renderTaskFilterPanel();
   renderGanttChart();
 });
 
