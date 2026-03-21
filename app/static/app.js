@@ -1,5 +1,6 @@
 const { createApiClient, escapeHtml, parseApiError, applyUserTheme, showTaskDescriptionModal } = window.PMCommon;
 const api = createApiClient();
+const pageParams = new URLSearchParams(window.location.search);
 
 const els = {
   userInfo: document.getElementById("user-info"),
@@ -15,6 +16,17 @@ const els = {
     rate: document.getElementById("stat-rate"),
   },
   projectForm: document.getElementById("project-form"),
+  projectTimelineRangeForm: document.getElementById("project-timeline-range-form"),
+  projectTimelineRangeStart: document.getElementById("project-timeline-range-start"),
+  projectTimelineRangeEnd: document.getElementById("project-timeline-range-end"),
+  projectTimelineRangeReset: document.getElementById("project-timeline-range-reset"),
+  projectTimelineFilterList: document.getElementById("project-timeline-filter-list"),
+  projectTimelineFilterSummary: document.getElementById("project-timeline-filter-summary"),
+  projectTimelineFilterSelectAll: document.getElementById("project-timeline-filter-select-all"),
+  projectTimelineFilterClearAll: document.getElementById("project-timeline-filter-clear-all"),
+  projectTimelineSortSelect: document.getElementById("project-timeline-sort-select"),
+  projectTimelineCursorDate: document.getElementById("project-timeline-cursor-date"),
+  projectTimeline: document.getElementById("project-timeline"),
   projectList: document.getElementById("project-list"),
   upcomingFilter: document.getElementById("upcoming-filter"),
   upcomingCountAll: document.getElementById("upcoming-count-all"),
@@ -26,6 +38,16 @@ let projects = [];
 let currentUser = null;
 let upcomingItems = [];
 let upcomingRelationFilter = "all";
+const projectTimelineRangeState = {
+  start: normalizeDateInputValue(pageParams.get("project_timeline_start")),
+  end: normalizeDateInputValue(pageParams.get("project_timeline_end")),
+};
+let projectTimelineFilterMode = "all";
+let selectedProjectTimelineIds = new Set();
+let currentProjectTimelineSort = "timeline";
+let currentProjectTimelineRenderState = null;
+let currentProjectTimelineHoveredTrack = null;
+const projectTimelineWeekdayFormatter = new Intl.DateTimeFormat("ko-KR", { weekday: "short" });
 
 function renderSiteBranding(branding) {
   if (els.heroTitle) {
@@ -69,6 +91,374 @@ function relationBadgeClass(raw) {
   if (raw === "owner") return "badge--owner";
   if (raw === "participant") return "badge--participant";
   return "";
+}
+
+function projectStatusColor(raw) {
+  const map = {
+    planned: "#2a6f97",
+    active: "#0f6d66",
+    done: "#5d768d",
+  };
+  return map[raw] || "#2a6f97";
+}
+
+function parseDateOnly(value) {
+  const raw = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  return new Date(`${raw}T00:00:00`);
+}
+
+function normalizeDateInputValue(value) {
+  const raw = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "";
+}
+
+function parseProjectTimelineFilterSelection(raw) {
+  const normalized = String(raw || "").trim();
+  if (!normalized) return { mode: "all", ids: new Set() };
+  if (normalized === "none") return { mode: "none", ids: new Set() };
+  const ids = new Set(
+    normalized
+      .split(",")
+      .map((value) => Number(value.trim()))
+      .filter((value) => Number.isFinite(value) && value > 0)
+  );
+  if (!ids.size) return { mode: "all", ids: new Set() };
+  return { mode: "custom", ids };
+}
+
+function normalizeProjectTimelineSortKey(raw) {
+  const key = String(raw || "timeline").trim();
+  return ["timeline", "start_date", "end_date", "due_date", "name"].includes(key) ? key : "timeline";
+}
+
+function toDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date, amount) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  return next;
+}
+
+function diffDays(start, end) {
+  return Math.max(0, Math.round((end.getTime() - start.getTime()) / 86400000));
+}
+
+function clampNumber(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function formatProjectRange(startRaw, endRaw) {
+  return `${startRaw || "-"} ~ ${endRaw || "-"}`;
+}
+
+const initialProjectTimelineFilter = parseProjectTimelineFilterSelection(pageParams.get("visible_projects"));
+projectTimelineFilterMode = initialProjectTimelineFilter.mode;
+selectedProjectTimelineIds = initialProjectTimelineFilter.ids;
+currentProjectTimelineSort = normalizeProjectTimelineSortKey(pageParams.get("project_timeline_sort"));
+
+function syncProjectTimelineUrl() {
+  const params = new URLSearchParams(window.location.search);
+
+  if (projectTimelineRangeState.start && projectTimelineRangeState.end) {
+    params.set("project_timeline_start", projectTimelineRangeState.start);
+    params.set("project_timeline_end", projectTimelineRangeState.end);
+  } else {
+    params.delete("project_timeline_start");
+    params.delete("project_timeline_end");
+  }
+
+  if (projectTimelineFilterMode === "all") {
+    params.delete("visible_projects");
+  } else if (projectTimelineFilterMode === "none") {
+    params.set("visible_projects", "none");
+  } else {
+    const serialized = [...selectedProjectTimelineIds].sort((a, b) => a - b).join(",");
+    if (serialized) {
+      params.set("visible_projects", serialized);
+    } else {
+      params.set("visible_projects", "none");
+    }
+  }
+
+  if (currentProjectTimelineSort === "timeline") {
+    params.delete("project_timeline_sort");
+  } else {
+    params.set("project_timeline_sort", currentProjectTimelineSort);
+  }
+
+  const query = params.toString();
+  const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+  window.history.replaceState({}, "", nextUrl);
+}
+
+function syncProjectTimelineInputs(range) {
+  if (els.projectTimelineRangeStart) {
+    els.projectTimelineRangeStart.value = range?.start ? toDateKey(range.start) : "";
+  }
+  if (els.projectTimelineRangeEnd) {
+    els.projectTimelineRangeEnd.value = range?.end ? toDateKey(range.end) : "";
+  }
+}
+
+function getProjectTimelineAutoRange(items) {
+  if (!items.length) return null;
+
+  const minStart = items.reduce((min, project) => (project.start < min ? project.start : min), items[0].start);
+  const maxEnd = items.reduce((max, project) => (project.end > max ? project.end : max), items[0].end);
+
+  return {
+    start: addDays(minStart, -2),
+    end: addDays(maxEnd, 2),
+  };
+}
+
+function getProjectTimelineProjects() {
+  return projects
+    .map((project) => {
+      const start = parseDateOnly(project.schedule_start_date);
+      const end = parseDateOnly(project.schedule_end_date);
+      const due = parseDateOnly(project.schedule_due_date || project.due_date);
+      if (!start || !end) return null;
+      return { ...project, start, end, due };
+    })
+    .filter(Boolean)
+    .sort(compareProjectTimelineItems);
+}
+
+function compareProjectTimelineItems(a, b) {
+  const startGap = a.start - b.start;
+  const endGap = a.end - b.end;
+  const dueA = a.due ? a.due.getTime() : Number.POSITIVE_INFINITY;
+  const dueB = b.due ? b.due.getTime() : Number.POSITIVE_INFINITY;
+  const dueGap = dueA - dueB;
+  const titleGap = String(a.name || "").localeCompare(String(b.name || ""), "ko", { sensitivity: "base" });
+
+  switch (currentProjectTimelineSort) {
+    case "start_date":
+      return startGap || endGap || dueGap || titleGap;
+    case "end_date":
+      return endGap || startGap || dueGap || titleGap;
+    case "due_date":
+      return dueGap || endGap || startGap || titleGap;
+    case "name":
+      return titleGap || startGap || endGap || dueGap;
+    case "timeline":
+    default:
+      return startGap || endGap || dueGap || titleGap;
+  }
+}
+
+function syncProjectTimelineFilterSelection(items = []) {
+  const availableIds = new Set(items.map((item) => Number(item.id)));
+
+  if (projectTimelineFilterMode === "all") {
+    selectedProjectTimelineIds = new Set(availableIds);
+    return;
+  }
+
+  selectedProjectTimelineIds = new Set([...selectedProjectTimelineIds].filter((id) => availableIds.has(id)));
+
+  if (projectTimelineFilterMode === "custom") {
+    if (selectedProjectTimelineIds.size === 0) {
+      projectTimelineFilterMode = "none";
+    } else if (selectedProjectTimelineIds.size === availableIds.size) {
+      projectTimelineFilterMode = "all";
+    }
+  }
+}
+
+function isProjectTimelineVisible(project) {
+  const projectId = Number(project.id);
+  if (projectTimelineFilterMode === "all") return true;
+  if (projectTimelineFilterMode === "none") return false;
+  return selectedProjectTimelineIds.has(projectId);
+}
+
+function renderProjectTimelineFilterPanel(items) {
+  if (!els.projectTimelineFilterList || !els.projectTimelineFilterSummary) return;
+
+  if (els.projectTimelineSortSelect) {
+    els.projectTimelineSortSelect.value = currentProjectTimelineSort;
+  }
+
+  syncProjectTimelineFilterSelection(items);
+
+  if (!items.length) {
+    els.projectTimelineFilterSummary.textContent = "표시 가능한 프로젝트 일정이 없습니다.";
+    els.projectTimelineFilterList.innerHTML = "<div class='gantt-filter-empty'>프로젝트 일정이 없습니다.</div>";
+    return;
+  }
+
+  const selectedCount = projectTimelineFilterMode === "all" ? items.length : selectedProjectTimelineIds.size;
+  els.projectTimelineFilterSummary.textContent =
+    projectTimelineFilterMode === "all"
+      ? `전체 ${items.length}개 프로젝트 표시 중`
+      : projectTimelineFilterMode === "none"
+        ? `선택된 프로젝트 없음 · 전체 ${items.length}개`
+        : `${selectedCount}개 선택 / 전체 ${items.length}개`;
+
+  els.projectTimelineFilterList.innerHTML = items
+    .map((project) => {
+      const checked = projectTimelineFilterMode === "all" ? true : selectedProjectTimelineIds.has(Number(project.id));
+      const badgeColor = projectStatusColor(project.status);
+      return `
+        <label class="gantt-filter-item">
+          <input type="checkbox" data-project-timeline-filter-id="${project.id}" ${checked ? "checked" : ""} />
+          <span class="gantt-filter-item__body">
+            <span class="gantt-filter-item__top">
+              <span class="gantt-filter-item__stage" style="background:${badgeColor}18; color:${badgeColor}; border-color:${badgeColor}33;">
+                ${escapeHtml(statusLabel(project.status))}
+              </span>
+              <span class="gantt-filter-item__date">${escapeHtml(formatProjectRange(project.schedule_start_date, project.schedule_end_date))}</span>
+            </span>
+            <span class="gantt-filter-item__title">${escapeHtml(project.name || "프로젝트")}</span>
+          </span>
+        </label>
+      `;
+    })
+    .join("");
+}
+
+function formatProjectTimelineCursorDate(date) {
+  const weekday = projectTimelineWeekdayFormatter.format(date);
+  return `${toDateKey(date)} (${weekday})`;
+}
+
+function hideProjectTimelineCursorDate() {
+  if (currentProjectTimelineHoveredTrack) {
+    currentProjectTimelineHoveredTrack
+      .querySelector(".project-overview-gantt__cursor-line")
+      ?.classList.add("hidden");
+    currentProjectTimelineHoveredTrack = null;
+  }
+  if (els.projectTimelineCursorDate) {
+    els.projectTimelineCursorDate.classList.add("hidden");
+  }
+}
+
+function showProjectTimelineCursorDate(track, clientX, clientY) {
+  if (!currentProjectTimelineRenderState || !els.projectTimelineCursorDate) return;
+
+  const rect = track.getBoundingClientRect();
+  if (!rect.width || currentProjectTimelineRenderState.totalDays <= 0) return;
+
+  const cellWidth = rect.width / currentProjectTimelineRenderState.totalDays;
+  const offsetX = Math.min(Math.max(0, clientX - rect.left), Math.max(rect.width - 1, 0));
+  const dayIndex = Math.min(
+    currentProjectTimelineRenderState.totalDays - 1,
+    Math.max(0, Math.floor(offsetX / Math.max(cellWidth, 1)))
+  );
+  const lineLeft = Math.min(rect.width - 1, Math.max(0, dayIndex * cellWidth + cellWidth / 2));
+  const line = track.querySelector(".project-overview-gantt__cursor-line");
+
+  if (currentProjectTimelineHoveredTrack && currentProjectTimelineHoveredTrack !== track) {
+    currentProjectTimelineHoveredTrack
+      .querySelector(".project-overview-gantt__cursor-line")
+      ?.classList.add("hidden");
+  }
+
+  currentProjectTimelineHoveredTrack = track;
+  if (line) {
+    line.style.left = `${lineLeft}px`;
+    line.classList.remove("hidden");
+  }
+
+  const hoveredDate = addDays(currentProjectTimelineRenderState.rangeStart, dayIndex);
+  const tooltip = els.projectTimelineCursorDate;
+  tooltip.textContent = formatProjectTimelineCursorDate(hoveredDate);
+  tooltip.classList.remove("hidden");
+
+  const margin = 12;
+  const offset = 16;
+  const tooltipRect = tooltip.getBoundingClientRect();
+  let left = clientX + offset;
+  let top = clientY + offset;
+
+  if (left + tooltipRect.width > window.innerWidth - margin) {
+    left = clientX - tooltipRect.width - offset;
+  }
+  if (top + tooltipRect.height > window.innerHeight - margin) {
+    top = clientY - tooltipRect.height - offset;
+  }
+
+  tooltip.style.left = `${Math.max(margin, left)}px`;
+  tooltip.style.top = `${Math.max(margin, top)}px`;
+}
+
+function getProjectTimelineAppliedRange(autoRange) {
+  const customStart = parseDateOnly(projectTimelineRangeState.start);
+  const customEnd = parseDateOnly(projectTimelineRangeState.end);
+
+  if (customStart && customEnd && customStart <= customEnd) {
+    return { start: customStart, end: customEnd, isCustom: true };
+  }
+  if (autoRange) {
+    return { ...autoRange, isCustom: false };
+  }
+  return null;
+}
+
+function buildProjectTimelineBands(rangeStart, rangeEnd) {
+  const bands = [];
+  let cursor = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
+  let bandIndex = 0;
+
+  while (cursor <= rangeEnd) {
+    const bandStart = cursor < rangeStart ? rangeStart : cursor;
+    const nextMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+    const monthEnd = addDays(nextMonth, -1);
+    const bandEnd = monthEnd < rangeEnd ? monthEnd : rangeEnd;
+    const startIndex = diffDays(rangeStart, bandStart);
+    const span = diffDays(bandStart, bandEnd) + 1;
+    const forceYear = bandIndex === 0 || nextMonth > rangeEnd || cursor.getMonth() === 0;
+    const label = forceYear
+      ? `${cursor.getFullYear()}.${String(cursor.getMonth() + 1).padStart(2, "0")}`
+      : `${cursor.getMonth() + 1}월`;
+
+    bands.push({
+      startIndex,
+      span,
+      label,
+      isEven: bandIndex % 2 === 0,
+      isYearBoundary: forceYear,
+    });
+
+    cursor = nextMonth;
+    bandIndex += 1;
+  }
+
+  return {
+    monthBandsHtml: bands
+      .map(
+        (band) => `
+          <span
+            class="project-overview-gantt__month-band ${band.isEven ? "is-even" : "is-odd"} ${
+              band.isYearBoundary ? "is-year-boundary" : ""
+            }"
+            style="left:calc(${band.startIndex} * var(--project-overview-cell)); width:calc(${band.span} * var(--project-overview-cell));"
+          ></span>
+        `
+      )
+      .join(""),
+    monthLabelsHtml: bands
+      .map(
+        (band) => `
+          <span
+            class="project-overview-gantt__month-label ${band.isYearBoundary ? "is-year-boundary" : ""}"
+            style="left:calc(${band.startIndex} * var(--project-overview-cell) + 10px);"
+          >
+            ${escapeHtml(band.label)}
+          </span>
+        `
+      )
+      .join(""),
+  };
 }
 
 function renderUpcomingItems(items) {
@@ -167,6 +557,7 @@ async function loadSiteBranding() {
 async function loadProjects() {
   projects = await api.get("/api/projects");
   renderProjects();
+  renderProjectTimeline();
 }
 
 function renderProjects() {
@@ -196,6 +587,161 @@ function renderProjects() {
     `;
     })
     .join("");
+}
+
+function renderProjectTimeline() {
+  if (!els.projectTimeline) return;
+  hideProjectTimelineCursorDate();
+  currentProjectTimelineRenderState = null;
+
+  const timelineProjects = getProjectTimelineProjects();
+  renderProjectTimelineFilterPanel(timelineProjects);
+  syncProjectTimelineUrl();
+
+  if (!timelineProjects.length) {
+    const customRange = getProjectTimelineAppliedRange(null);
+    syncProjectTimelineInputs(customRange);
+    els.projectTimeline.innerHTML = "<div class='item project-overview-gantt__empty'>표시할 프로젝트 일정이 없습니다.</div>";
+    return;
+  }
+
+  const filteredProjects = timelineProjects.filter((project) => isProjectTimelineVisible(project));
+  if (!filteredProjects.length) {
+    const customRange = getProjectTimelineAppliedRange(null);
+    syncProjectTimelineInputs(customRange);
+    els.projectTimeline.innerHTML = "<div class='item project-overview-gantt__empty'>선택된 프로젝트가 없습니다.</div>";
+    return;
+  }
+
+  const autoRange = getProjectTimelineAutoRange(filteredProjects);
+  const appliedRange = getProjectTimelineAppliedRange(autoRange);
+  if (!appliedRange) {
+    els.projectTimeline.innerHTML = "<div class='item project-overview-gantt__empty'>표시할 프로젝트 일정이 없습니다.</div>";
+    return;
+  }
+
+  syncProjectTimelineInputs(appliedRange);
+
+  const visibleProjects = filteredProjects
+    .map((project) => {
+      if (project.end < appliedRange.start || project.start > appliedRange.end) return null;
+
+      return {
+        ...project,
+        visibleStart: project.start < appliedRange.start ? appliedRange.start : project.start,
+        visibleEnd: project.end > appliedRange.end ? appliedRange.end : project.end,
+      };
+    })
+    .filter(Boolean);
+
+  if (!visibleProjects.length) {
+    els.projectTimeline.innerHTML =
+      "<div class='item project-overview-gantt__empty'>선택한 범위에 표시할 프로젝트 일정이 없습니다.</div>";
+    return;
+  }
+
+  const totalDays = diffDays(appliedRange.start, appliedRange.end) + 1;
+  const cellWidth = clampNumber(960 / Math.max(totalDays, 1), 3, 14);
+  const styleVars = `--project-overview-days:${totalDays}; --project-overview-cell:${cellWidth}px;`;
+  const { monthBandsHtml, monthLabelsHtml } = buildProjectTimelineBands(appliedRange.start, appliedRange.end);
+  currentProjectTimelineRenderState = {
+    rangeStart: new Date(appliedRange.start),
+    totalDays,
+  };
+
+  const rowsHtml = visibleProjects
+    .map((project) => {
+      const barLeft = diffDays(appliedRange.start, project.visibleStart);
+      const barSpan = diffDays(project.visibleStart, project.visibleEnd) + 1;
+      const dueIndex =
+        project.due && project.due >= appliedRange.start && project.due <= appliedRange.end
+          ? diffDays(appliedRange.start, project.due)
+          : null;
+      const barColor = projectStatusColor(project.status);
+      return `
+        <div class="project-overview-gantt__row" style="grid-template-columns:240px auto;">
+          <div class="project-overview-gantt__label">
+            <div class="item__head">
+              <strong>${escapeHtml(project.name)}</strong>
+              <span class="badge">${escapeHtml(statusLabel(project.status))}</span>
+            </div>
+            <div class="item__meta">기간: ${escapeHtml(
+              formatProjectRange(project.schedule_start_date, project.schedule_end_date)
+            )}</div>
+            <div class="item__meta">담당: ${escapeHtml(project.owner)} | 마감: ${escapeHtml(project.due_date || "-")}</div>
+          </div>
+          <div class="project-overview-gantt__track-wrap">
+            <div class="project-overview-gantt__track" style="${styleVars}">
+              ${monthBandsHtml}
+              ${
+                dueIndex !== null
+                  ? `<span class="project-overview-gantt__marker" style="left:calc(${dueIndex} * var(--project-overview-cell))"></span>`
+                  : ""
+              }
+              <button
+                type="button"
+                class="project-overview-gantt__bar"
+                data-open-project-gantt="${project.id}"
+                style="left:calc(${barLeft} * var(--project-overview-cell)); width:calc(${barSpan} * var(--project-overview-cell) - 8px); background:${barColor};"
+                title="${escapeHtml(project.name)} 간트 차트 열기"
+              >
+                <span class="project-overview-gantt__bar-title">${escapeHtml(project.name)}</span>
+              </button>
+              <span class="project-overview-gantt__cursor-line hidden" aria-hidden="true"></span>
+            </div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  els.projectTimeline.innerHTML = `
+    <div class="project-overview-gantt__scroll">
+      <div class="project-overview-gantt__board">
+        <div class="project-overview-gantt__row project-overview-gantt__row--header" style="grid-template-columns:240px auto;">
+          <div class="project-overview-gantt__label project-overview-gantt__label--header">
+            <span class="project-overview-gantt__eyebrow">Project Timeline</span>
+            <strong>프로젝트</strong>
+          </div>
+          <div class="project-overview-gantt__track-wrap">
+            <div class="project-overview-gantt__track project-overview-gantt__track--header" style="${styleVars}">
+              ${monthBandsHtml}
+              <div class="project-overview-gantt__month-labels">${monthLabelsHtml}</div>
+              <span class="project-overview-gantt__cursor-line hidden" aria-hidden="true"></span>
+            </div>
+          </div>
+        </div>
+        ${rowsHtml}
+      </div>
+    </div>
+  `;
+}
+
+function applyProjectTimelineRangeFromInputs() {
+  const start = normalizeDateInputValue(els.projectTimelineRangeStart?.value);
+  const end = normalizeDateInputValue(els.projectTimelineRangeEnd?.value);
+
+  if (!start || !end) return;
+  if (start > end) return;
+
+  projectTimelineRangeState.start = start;
+  projectTimelineRangeState.end = end;
+  syncProjectTimelineUrl();
+  renderProjectTimeline();
+}
+
+function resetProjectTimelineRange() {
+  projectTimelineRangeState.start = "";
+  projectTimelineRangeState.end = "";
+  syncProjectTimelineUrl();
+  renderProjectTimeline();
+}
+
+function setProjectTimelineFilterMode(nextMode, ids = new Set()) {
+  projectTimelineFilterMode = nextMode;
+  selectedProjectTimelineIds = new Set(ids);
+  syncProjectTimelineUrl();
+  renderProjectTimeline();
 }
 
 els.logoutBtn.addEventListener("click", async () => {
@@ -278,6 +824,86 @@ els.projectList?.addEventListener("click", async (e) => {
   } catch (err) {
     alert(parseApiError(err));
   }
+});
+
+els.projectTimeline?.addEventListener("click", (e) => {
+  const ganttBtn = e.target.closest("[data-open-project-gantt]");
+  if (!ganttBtn) return;
+  const id = ganttBtn.getAttribute("data-open-project-gantt");
+  window.location.href = `/static/project_gantt.html?project_id=${id}`;
+});
+
+els.projectTimelineRangeForm?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  applyProjectTimelineRangeFromInputs();
+});
+
+els.projectTimelineRangeStart?.addEventListener("change", () => {
+  applyProjectTimelineRangeFromInputs();
+});
+
+els.projectTimelineRangeEnd?.addEventListener("change", () => {
+  window.setTimeout(() => {
+    applyProjectTimelineRangeFromInputs();
+  }, 0);
+});
+
+els.projectTimelineRangeReset?.addEventListener("click", () => {
+  resetProjectTimelineRange();
+});
+
+els.projectTimelineFilterList?.addEventListener("change", (e) => {
+  const checkbox = e.target.closest("[data-project-timeline-filter-id]");
+  if (!checkbox) return;
+
+  const projectId = Number(checkbox.getAttribute("data-project-timeline-filter-id"));
+  if (!Number.isFinite(projectId)) return;
+
+  if (checkbox.checked) {
+    selectedProjectTimelineIds.add(projectId);
+  } else {
+    selectedProjectTimelineIds.delete(projectId);
+  }
+
+  const availableProjects = getProjectTimelineProjects();
+  if (selectedProjectTimelineIds.size === 0) {
+    projectTimelineFilterMode = "none";
+  } else if (selectedProjectTimelineIds.size === availableProjects.length) {
+    projectTimelineFilterMode = "all";
+  } else {
+    projectTimelineFilterMode = "custom";
+  }
+
+  syncProjectTimelineUrl();
+  renderProjectTimeline();
+});
+
+els.projectTimelineFilterSelectAll?.addEventListener("click", () => {
+  const allProjectIds = getProjectTimelineProjects().map((project) => Number(project.id));
+  setProjectTimelineFilterMode("all", new Set(allProjectIds));
+});
+
+els.projectTimelineFilterClearAll?.addEventListener("click", () => {
+  setProjectTimelineFilterMode("none", new Set());
+});
+
+els.projectTimelineSortSelect?.addEventListener("change", (e) => {
+  currentProjectTimelineSort = normalizeProjectTimelineSortKey(e.target.value);
+  syncProjectTimelineUrl();
+  renderProjectTimeline();
+});
+
+els.projectTimeline?.addEventListener("mousemove", (e) => {
+  const track = e.target.closest(".project-overview-gantt__track");
+  if (!track || !els.projectTimeline.contains(track)) {
+    hideProjectTimelineCursorDate();
+    return;
+  }
+  showProjectTimelineCursorDate(track, e.clientX, e.clientY);
+});
+
+els.projectTimeline?.addEventListener("mouseleave", () => {
+  hideProjectTimelineCursorDate();
 });
 
 els.todayNotifications?.addEventListener("click", (e) => {

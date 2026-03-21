@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>프로젝트 간트 차트</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260321_12" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260321_20" />
   </head>
   <body class="page-gantt">
     <header class="hero hero--gantt">
@@ -78,9 +78,9 @@
                 <div class="gantt-filter-panel__eyebrow">작업 필터</div>
                 <strong>보고 싶은 작업만 선택</strong>
               </div>
-              <div class="actions">
+              <div class="gantt-filter-panel__controls">
                 <label class="gantt-filter-panel__sort">
-                  <span class="item__meta">정렬</span>
+                  <span class="gantt-filter-panel__sort-label">정렬</span>
                   <select id="gantt-sort-select">
                     <option value="timeline">타임라인 순</option>
                     <option value="manual">기본 순번</option>
@@ -89,8 +89,10 @@
                     <option value="title">작업명 순</option>
                   </select>
                 </label>
-                <button id="gantt-filter-select-all" class="gantt-filter-panel__action" type="button">전체 선택</button>
-                <button id="gantt-filter-clear-all" class="gantt-filter-panel__action" type="button">전체 해제</button>
+                <div class="gantt-filter-panel__buttons">
+                  <button id="gantt-filter-select-all" class="gantt-filter-panel__action" type="button">전체 선택</button>
+                  <button id="gantt-filter-clear-all" class="gantt-filter-panel__action" type="button">전체 해제</button>
+                </div>
               </div>
             </div>
             <div id="gantt-filter-summary" class="item__meta gantt-filter-panel__summary">전체 작업 표시 중</div>
@@ -102,6 +104,7 @@
           <div id="gantt-empty" class="item gantt-empty hidden">표시할 일정이 없습니다.</div>
           <div id="gantt-scroll" class="gantt-scroll hidden"></div>
         </div>
+        <div id="gantt-cursor-date" class="gantt-cursor-date hidden" aria-hidden="true"></div>
       </section>
 
       <section class="panel gantt-panel gantt-panel--secondary">
@@ -184,6 +187,6 @@
       })();
     </script>
     <script src="/static/common.js?v=20260321_15"></script>
-    <script src="/static/project_gantt.js?v=20260321_12"></script>
+    <script src="/static/project_gantt.js?v=20260321_20"></script>
   </body>
 </html>

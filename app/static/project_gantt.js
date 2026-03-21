@@ -34,6 +34,7 @@ const els = {
   filterSelectAll: document.getElementById("gantt-filter-select-all"),
   filterClearAll: document.getElementById("gantt-filter-clear-all"),
   sortSelect: document.getElementById("gantt-sort-select"),
+  cursorDate: document.getElementById("gantt-cursor-date"),
 };
 
 const STAGE_COLORS = ["#0f6d66", "#2a6f97", "#c06c2c", "#7a4fb0", "#3b7a57", "#9b2226"];
@@ -48,6 +49,9 @@ let canEditTasks = false;
 let taskFilterMode = "all";
 let selectedTaskIds = new Set();
 let currentSort = "timeline";
+let currentGanttRenderState = null;
+let currentGanttHoveredTrack = null;
+const ganttCursorWeekdayFormatter = new Intl.DateTimeFormat("ko-KR", { weekday: "short" });
 
 function parseTaskFilterSelection(raw) {
   const normalized = String(raw || "").trim();
@@ -617,6 +621,7 @@ function renderScheduledRows({ scheduledItems, dayIndexMap, todayIndex, dueIndex
           <div class="gantt-track ${headerMode !== "day" ? "gantt-track--overview" : ""}" style="${styleVars}">
             ${headerMode !== "day" ? trackBandsHtml : ""}
             ${buildMarkerHtml(todayIndex, dueIndex)}
+            <span class="gantt-cursor-line hidden" aria-hidden="true"></span>
           </div>
         </div>
       </div>
@@ -664,6 +669,7 @@ function renderScheduledRows({ scheduledItems, dayIndexMap, todayIndex, dueIndex
                 <span class="gantt-bar__title">${escapeHtml(item.content)}</span>
                 ${span >= 4 ? `<span class="gantt-bar__duration">${durationLabel}</span>` : ""}
               </button>
+              <span class="gantt-cursor-line hidden" aria-hidden="true"></span>
             </div>
           </div>
         </div>
@@ -673,6 +679,8 @@ function renderScheduledRows({ scheduledItems, dayIndexMap, todayIndex, dueIndex
 }
 
 function renderGanttChart() {
+  hideGanttCursorDate();
+  currentGanttRenderState = null;
   const today = parseLocalDate(toDateKey(new Date()));
   const allSortedItems = normalizeItems(today, checklistItems);
   const filteredSourceItems = checklistItems.filter((item) => isChecklistVisible(item));
@@ -729,6 +737,10 @@ function renderGanttChart() {
   const headerLabelsHtml = buildTimelineHeaderLabels(days, headerConfig, metrics.cellWidth);
   const monthBandsHtml = buildTimelineMonthBands(days);
   const trackBandsHtml = buildTimelineTrackBands(days);
+  currentGanttRenderState = {
+    rangeStart: new Date(appliedRange.start),
+    totalDays: days.length,
+  };
 
   els.rangeLabel.textContent = formatRange(appliedRange.start, appliedRange.end);
   els.empty.classList.add("hidden");
@@ -760,6 +772,7 @@ function renderGanttChart() {
             })
             .join("")}
           ${headerLabelsHtml ? `<div class="gantt-header-labels">${headerLabelsHtml}</div>` : ""}
+          <span class="gantt-cursor-line hidden" aria-hidden="true"></span>
         </div>
       </div>
     </div>
@@ -872,7 +885,69 @@ function getInclusiveDaySpan(start, end) {
 }
 
 function formatTimelineWeekdayLabel(date) {
-  return new Intl.DateTimeFormat("ko-KR", { weekday: "short" }).format(date);
+  return ganttCursorWeekdayFormatter.format(date);
+}
+
+function formatGanttCursorDate(date) {
+  return `${toDateKey(date)} (${formatTimelineWeekdayLabel(date)})`;
+}
+
+function hideGanttCursorDate() {
+  if (currentGanttHoveredTrack) {
+    currentGanttHoveredTrack.querySelector(".gantt-cursor-line")?.classList.add("hidden");
+    currentGanttHoveredTrack = null;
+  }
+
+  if (els.cursorDate) {
+    els.cursorDate.classList.add("hidden");
+  }
+}
+
+function showGanttCursorDate(track, clientX, clientY) {
+  if (!currentGanttRenderState || !els.cursorDate) return;
+
+  const rect = track.getBoundingClientRect();
+  if (!rect.width || currentGanttRenderState.totalDays <= 0) return;
+
+  const cellWidth = rect.width / currentGanttRenderState.totalDays;
+  const offsetX = Math.min(Math.max(0, clientX - rect.left), Math.max(rect.width - 1, 0));
+  const dayIndex = Math.min(
+    currentGanttRenderState.totalDays - 1,
+    Math.max(0, Math.floor(offsetX / Math.max(cellWidth, 1)))
+  );
+  const lineLeft = Math.min(rect.width - 1, Math.max(0, dayIndex * cellWidth + cellWidth / 2));
+  const line = track.querySelector(".gantt-cursor-line");
+
+  if (currentGanttHoveredTrack && currentGanttHoveredTrack !== track) {
+    currentGanttHoveredTrack.querySelector(".gantt-cursor-line")?.classList.add("hidden");
+  }
+
+  currentGanttHoveredTrack = track;
+  if (line) {
+    line.style.left = `${lineLeft}px`;
+    line.classList.remove("hidden");
+  }
+
+  const hoveredDate = addDays(currentGanttRenderState.rangeStart, dayIndex);
+  const tooltip = els.cursorDate;
+  tooltip.textContent = formatGanttCursorDate(hoveredDate);
+  tooltip.classList.remove("hidden");
+
+  const margin = 12;
+  const offset = 16;
+  const tooltipRect = tooltip.getBoundingClientRect();
+  let left = clientX + offset;
+  let top = clientY + offset;
+
+  if (left + tooltipRect.width > window.innerWidth - margin) {
+    left = clientX - tooltipRect.width - offset;
+  }
+  if (top + tooltipRect.height > window.innerHeight - margin) {
+    top = clientY - tooltipRect.height - offset;
+  }
+
+  tooltip.style.left = `${Math.max(margin, left)}px`;
+  tooltip.style.top = `${Math.max(margin, top)}px`;
 }
 
 function formatTimelineMonthBandLabel(date, forceYear = false) {
@@ -1045,6 +1120,7 @@ function renderScheduledRows({ scheduledItems, dayIndexMap, todayIndex, dueIndex
           <div class="gantt-track ${headerMode !== "day" ? "gantt-track--overview" : ""}" style="${styleVars}">
             ${headerMode !== "day" ? trackBandsHtml : ""}
             ${buildMarkerHtml(todayIndex, dueIndex)}
+            <span class="gantt-cursor-line hidden" aria-hidden="true"></span>
           </div>
         </div>
       </div>
@@ -1092,6 +1168,7 @@ function renderScheduledRows({ scheduledItems, dayIndexMap, todayIndex, dueIndex
                 <span class="gantt-bar__title">${escapeHtml(item.content)}</span>
                 ${span >= 4 ? `<span class="gantt-bar__duration">${durationLabel}</span>` : ""}
               </button>
+              <span class="gantt-cursor-line hidden" aria-hidden="true"></span>
             </div>
           </div>
         </div>
@@ -1101,6 +1178,8 @@ function renderScheduledRows({ scheduledItems, dayIndexMap, todayIndex, dueIndex
 }
 
 function renderGanttChart() {
+  hideGanttCursorDate();
+  currentGanttRenderState = null;
   const today = parseLocalDate(toDateKey(new Date()));
   const allSortedItems = normalizeItems(today, checklistItems);
   const filteredSourceItems = checklistItems.filter((item) => isChecklistVisible(item));
@@ -1154,6 +1233,10 @@ function renderGanttChart() {
   const headerLabelsHtml = buildTimelineHeaderLabels(days, headerConfig, metrics.cellWidth);
   const monthBandsHtml = buildTimelineMonthBands(days);
   const trackBandsHtml = buildTimelineTrackBands(days);
+  currentGanttRenderState = {
+    rangeStart: new Date(appliedRange.start),
+    totalDays: days.length,
+  };
 
   els.rangeLabel.textContent = formatRange(appliedRange.start, appliedRange.end);
   els.empty.classList.add("hidden");
@@ -1185,6 +1268,7 @@ function renderGanttChart() {
             })
             .join("")}
           ${headerLabelsHtml ? `<div class="gantt-header-labels">${headerLabelsHtml}</div>` : ""}
+          <span class="gantt-cursor-line hidden" aria-hidden="true"></span>
         </div>
       </div>
     </div>
@@ -1237,6 +1321,19 @@ els.scroll?.addEventListener("click", (e) => {
   const detailBtn = e.target.closest("[data-open-gantt-description]");
   if (!detailBtn) return;
   openChecklistDetails(detailBtn.getAttribute("data-open-gantt-description"));
+});
+
+els.scroll?.addEventListener("mousemove", (e) => {
+  const track = e.target.closest(".gantt-track, .gantt-days");
+  if (!track || !els.scroll.contains(track)) {
+    hideGanttCursorDate();
+    return;
+  }
+  showGanttCursorDate(track, e.clientX, e.clientY);
+});
+
+els.scroll?.addEventListener("mouseleave", () => {
+  hideGanttCursorDate();
 });
 
 els.unscheduledList?.addEventListener("click", (e) => {

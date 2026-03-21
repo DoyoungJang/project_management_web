@@ -665,6 +665,23 @@ def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     return dict(row)
 
 
+def normalize_date_text(value: Any) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    return raw[:10]
+
+
+def min_date_text(*values: Any) -> str | None:
+    cleaned = [value for value in (normalize_date_text(v) for v in values) if value]
+    return min(cleaned) if cleaned else None
+
+
+def max_date_text(*values: Any) -> str | None:
+    cleaned = [value for value in (normalize_date_text(v) for v in values) if value]
+    return max(cleaned) if cleaned else None
+
+
 def get_site_setting(conn: sqlite3.Connection, key: str, default_value: str) -> str:
     row = conn.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
     if not row:
@@ -1614,7 +1631,45 @@ def list_projects(current_user: dict[str, Any] = Depends(get_current_user)) -> l
                 """,
                 (current_user["username"], current_user["username"]),
             ).fetchall()
-    return [row_to_dict(row) for row in rows]
+        projects = [row_to_dict(row) for row in rows]
+        if not projects:
+            return []
+
+        project_ids = [int(project["id"]) for project in projects]
+        placeholders = ",".join("?" for _ in project_ids)
+        summary_rows = conn.execute(
+            f"""
+            SELECT
+                project_id,
+                MIN(
+                    CASE
+                        WHEN NULLIF(start_date, '') IS NOT NULL THEN date(start_date)
+                        WHEN NULLIF(target_date, '') IS NOT NULL THEN date(target_date)
+                        ELSE NULL
+                    END
+                ) AS schedule_start_date,
+                MAX(date(NULLIF(target_date, ''))) AS latest_target_date
+            FROM project_checklist_items
+            WHERE project_id IN ({placeholders})
+            GROUP BY project_id
+            """,
+            project_ids,
+        ).fetchall()
+
+    schedule_by_project = {int(row["project_id"]): row_to_dict(row) for row in summary_rows}
+    for project in projects:
+        project_id = int(project["id"])
+        summary = schedule_by_project.get(project_id, {})
+        created_date = normalize_date_text(project.get("created_at"))
+        schedule_start = normalize_date_text(summary.get("schedule_start_date")) or created_date
+        schedule_end = max_date_text(project.get("due_date"), summary.get("latest_target_date"))
+        if schedule_start and schedule_end and schedule_start > schedule_end:
+            schedule_start = schedule_end
+        project["schedule_start_date"] = schedule_start
+        project["schedule_end_date"] = schedule_end
+        project["schedule_due_date"] = normalize_date_text(project.get("due_date"))
+
+    return projects
 
 
 @app.get("/api/projects/{project_id}")
