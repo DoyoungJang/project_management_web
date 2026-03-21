@@ -220,7 +220,6 @@
     const title = dialog.querySelector("#task-desc-dialog-title");
     const meta = dialog.querySelector("#task-desc-dialog-meta");
     const body = dialog.querySelector("#task-desc-dialog-body");
-    const copyBtn = dialog.querySelector("#task-desc-copy-btn");
     const editBtn = dialog.querySelector("#task-desc-edit-btn");
     const closeBtn = dialog.querySelector("#task-desc-close-btn");
     const form = dialog.querySelector("#task-desc-edit-form");
@@ -235,22 +234,18 @@
     if (title) title.textContent = rawTitle;
     if (meta) meta.textContent = metaParts.join(" | ");
 
-    if (copyBtn) {
-      copyBtn.hidden = state.mode === "edit";
-      copyBtn.disabled = state.saving;
-      copyBtn.setAttribute("data-copy-text", rawDescription);
-    }
-
     if (editBtn) {
-      editBtn.hidden = !editable;
+      editBtn.hidden = !editable || state.mode === "edit";
       editBtn.disabled = state.saving;
-      editBtn.textContent = state.mode === "edit" ? "\uC218\uC815 \uC911" : "\uC218\uC815";
+      editBtn.textContent = "\uC218\uC815";
     }
 
     if (closeBtn) closeBtn.disabled = state.saving;
 
     if (body) {
-      body.hidden = state.mode === "edit";
+      const showBody = state.mode !== "edit";
+      body.hidden = !showBody;
+      body.style.display = showBody ? "" : "none";
       body.innerHTML = "";
       if (rawDescription) {
         appendLinkedText(body, rawDescription);
@@ -260,7 +255,9 @@
     }
 
     if (form) {
-      form.hidden = !(editable && state.mode === "edit");
+      const showForm = editable && state.mode === "edit";
+      form.hidden = !showForm;
+      form.style.display = showForm ? "grid" : "none";
 
       const statusOptions =
         Array.isArray(options.statusOptions) && options.statusOptions.length
@@ -271,6 +268,7 @@
       const startDateInput = form.querySelector("[name='start_date']");
       const targetDateInput = form.querySelector("[name='target_date']");
       const statusSelect = form.querySelector("[name='workflow_status']");
+      const inputs = form.querySelectorAll("input, textarea, select");
 
       if (statusSelect) {
         statusSelect.innerHTML = statusOptions
@@ -282,6 +280,9 @@
       if (startDateInput) startDateInput.value = String(options.startDate || "");
       if (targetDateInput) targetDateInput.value = String(options.targetDate || "");
       if (statusSelect) statusSelect.value = String(options.workflowStatus || "upcoming");
+      inputs.forEach((input) => {
+        input.disabled = !(editable && state.mode === "edit") || state.saving;
+      });
     }
 
     if (saveBtn) {
@@ -305,7 +306,6 @@
           </div>
           <div class="actions">
             <button id="task-desc-edit-btn" type="button">\uC218\uC815</button>
-            <button id="task-desc-copy-btn" type="button">\uBCF5\uC0AC</button>
             <button id="task-desc-close-btn" type="button">\uB2EB\uAE30</button>
           </div>
         </div>
@@ -347,20 +347,6 @@
       const isOutside =
         e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom;
       if (isOutside) dialog.close();
-    });
-
-    dialog.querySelector("#task-desc-copy-btn")?.addEventListener("click", async (e) => {
-      const copyBtn = e.currentTarget;
-      const raw = String(copyBtn.getAttribute("data-copy-text") || "");
-      try {
-        await navigator.clipboard.writeText(raw);
-        copyBtn.textContent = "\uBCF5\uC0AC\uB428";
-        window.setTimeout(() => {
-          copyBtn.textContent = "\uBCF5\uC0AC";
-        }, 1200);
-      } catch (_) {
-        alert("\uBCF5\uC0AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.");
-      }
     });
 
     dialog.querySelector("#task-desc-close-btn")?.addEventListener("click", () => {
