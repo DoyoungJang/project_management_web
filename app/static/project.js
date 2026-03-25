@@ -26,6 +26,8 @@ const els = {
   title: document.getElementById("project-title"),
   form: document.getElementById("project-update-form"),
   stages: document.getElementById("stage-container"),
+  taskSortSelect: document.getElementById("task-sort-select"),
+  taskSortHint: document.getElementById("task-sort-hint"),
   stageCreateForm: document.getElementById("stage-create-form"),
   stageNameInput: document.getElementById("stage-name-input"),
   stageList: document.getElementById("stage-list"),
@@ -46,6 +48,15 @@ let projectStages = [];
 let draggingChecklistId = null;
 let currentUser = null;
 let editingChecklistId = null;
+let draggingStageManagerId = null;
+let draggingStageChecklistId = null;
+let draggingStageChecklistStageKey = null;
+let currentTaskSort = normalizeTaskSortKey(params.get("task_sort"));
+
+function normalizeTaskSortKey(raw) {
+  const key = String(raw || "manual").trim();
+  return ["manual", "title", "start_date", "target_date"].includes(key) ? key : "manual";
+}
 
 function stageLabel(stage) {
   const foundDynamic = projectStages.find((x) => x.stage_key === stage);
@@ -74,6 +85,80 @@ function schedulePreview(item) {
   return `시작일: ${item.start_date || "-"} | 목표일: ${item.target_date || "-"} | 상태: ${workflowStatusLabel(
     item.workflow_status || "upcoming"
   )}`;
+}
+
+function compareDateText(a, b) {
+  const aText = String(a || "").trim();
+  const bText = String(b || "").trim();
+  if (!aText && !bText) return 0;
+  if (!aText) return 1;
+  if (!bText) return -1;
+  return aText.localeCompare(bText);
+}
+
+function compareChecklistItemsForSettings(a, b) {
+  const manualGap = Number(a.position || 0) - Number(b.position || 0) || Number(a.id) - Number(b.id);
+  const titleGap = String(a.content || "").localeCompare(String(b.content || ""), "ko", { sensitivity: "base" });
+
+  switch (currentTaskSort) {
+    case "title":
+      return titleGap || compareDateText(a.start_date, b.start_date) || compareDateText(a.target_date, b.target_date) || manualGap;
+    case "start_date":
+      return compareDateText(a.start_date, b.start_date) || titleGap || compareDateText(a.target_date, b.target_date) || manualGap;
+    case "target_date":
+      return compareDateText(a.target_date, b.target_date) || titleGap || compareDateText(a.start_date, b.start_date) || manualGap;
+    case "manual":
+    default:
+      return manualGap;
+  }
+}
+
+function syncTaskSortToUrl() {
+  const nextParams = new URLSearchParams(window.location.search);
+  if (currentTaskSort === "manual") {
+    nextParams.delete("task_sort");
+  } else {
+    nextParams.set("task_sort", currentTaskSort);
+  }
+  const nextQuery = nextParams.toString();
+  window.history.replaceState(null, "", `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`);
+}
+
+function renderTaskSortUi() {
+  if (els.taskSortSelect) els.taskSortSelect.value = currentTaskSort;
+  if (!els.taskSortHint) return;
+  els.taskSortHint.textContent =
+    currentTaskSort === "manual"
+      ? "기존 정렬에서는 드래그로 순서를 직접 바꿀 수 있습니다."
+      : "선택한 기준이 모든 대항목에 일괄 적용됩니다. 이 상태에서는 드래그 정렬이 잠시 비활성화됩니다.";
+}
+
+function moveIdBeforeOrAfter(list, draggedId, targetId, placeAfter = false) {
+  const next = list.filter((id) => Number(id) !== Number(draggedId));
+  const targetIndex = next.findIndex((id) => Number(id) === Number(targetId));
+  if (targetIndex < 0) return list.slice();
+  next.splice(targetIndex + (placeAfter ? 1 : 0), 0, Number(draggedId));
+  return next;
+}
+
+function getDragPlacement(event, element) {
+  const rect = element.getBoundingClientRect();
+  return event.clientY >= rect.top + rect.height / 2 ? "after" : "before";
+}
+
+function clearDragIndicators(root) {
+  root
+    ?.querySelectorAll(".drag-target-before, .drag-target-after, .dragging")
+    .forEach((node) => node.classList.remove("drag-target-before", "drag-target-after", "dragging"));
+}
+
+function applyDragIndicator(root, target, placement) {
+  if (!root || !target) return;
+  root.querySelectorAll(".drag-target-before, .drag-target-after").forEach((node) => {
+    if (node !== target) node.classList.remove("drag-target-before", "drag-target-after");
+  });
+  target.classList.toggle("drag-target-before", placement === "before");
+  target.classList.toggle("drag-target-after", placement === "after");
 }
 
 async function loadSession() {
@@ -123,6 +208,7 @@ function renderParticipants() {
 
   if (!list.length) {
     els.participantList.innerHTML = "<div class='item'>등록된 프로젝트 참가자가 없습니다.</div>";
+    scheduleStageListHeightAdjustment();
     return;
   }
   els.participantList.innerHTML = `
@@ -149,19 +235,32 @@ function renderParticipants() {
     `
     )
     .join("");
+  scheduleStageListHeightAdjustment();
+}
+
+function adjustStageListHeight() {
+  if (!els.stageList) return;
+  els.stageList.style.removeProperty("max-height");
+}
+
+function scheduleStageListHeightAdjustment() {
+  window.requestAnimationFrame(() => {
+    adjustStageListHeight();
+  });
 }
 
 function renderStageManager() {
   if (!els.stageList) return;
   if (!projectStages.length) {
     els.stageList.innerHTML = "<div class='item stage-manager-item'>등록된 대항목이 없습니다.</div>";
+    scheduleStageListHeightAdjustment();
     return;
   }
 
   els.stageList.innerHTML = projectStages
     .map(
       (stage, idx) => `
-      <div class="item stage-manager-item">
+      <div class="item stage-manager-item" draggable="true" data-stage-drag-id="${stage.id}">
         <div class="item__head">
           <div class="stage-manager-title">
             <span class="stage-manager-index">${idx + 1}</span>
@@ -177,6 +276,7 @@ function renderStageManager() {
     `
     )
     .join("");
+  scheduleStageListHeightAdjustment();
 }
 
 function renderBoard() {
@@ -217,6 +317,7 @@ function renderBoard() {
 
 function renderStages() {
   if (!els.stages) return;
+  renderTaskSortUi();
   if (!projectStages.length) {
     els.stages.innerHTML = "<div class='item'>대항목을 먼저 추가해 주세요.</div>";
     return;
@@ -227,7 +328,7 @@ function renderStages() {
 function renderStage(stage) {
   const items = checklistItems
     .filter((x) => x.stage === stage.stage_key)
-    .sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
+    .sort(compareChecklistItemsForSettings);
   const listHtml =
     items.length === 0
       ? "<div class='item__meta'>작업 항목이 없습니다.</div>"
@@ -281,7 +382,12 @@ function renderStage(stage) {
             }
 
             return `
-            <div class="template-item-card project-item-card ${item.is_done ? "project-item-card--done" : ""}">
+            <div
+              class="template-item-card project-item-card ${item.is_done ? "project-item-card--done" : ""}"
+              ${editingChecklistId === null && currentTaskSort === "manual" ? 'draggable="true"' : ""}
+              data-stage-checklist-drag-id="${item.id}"
+              data-stage-checklist-stage="${escapeHtml(stage.stage_key)}"
+            >
               <label class="inline-check project-item-card__toggle">
                 <input type="checkbox" data-toggle-item="${item.id}" ${item.is_done ? "checked" : ""} />
                 완료
@@ -306,7 +412,7 @@ function renderStage(stage) {
         <h3>${stage.stage_name}</h3>
         <span class="badge">${items.length}개</span>
       </div>
-      <div class="check-list">${listHtml}</div>
+      <div class="check-list" data-stage-item-list="${escapeHtml(stage.stage_key)}">${listHtml}</div>
       <form class="check-form work-check-form project-item-create-form" data-stage-form="${stage.stage_key}">
         <input name="content" placeholder="작업 항목 입력" required minlength="1" maxlength="200" />
         <textarea name="description" placeholder="설명 팝업 내용 입력" maxlength="5000"></textarea>
@@ -333,6 +439,19 @@ function renderStage(stage) {
       </form>
     </article>
   `;
+}
+
+async function saveStageOrder(nextStageIds) {
+  await api.post(`/api/projects/${projectId}/stage-reorder`, { stage_ids: nextStageIds });
+  await loadStages();
+  await loadChecklist();
+}
+
+async function saveStageChecklistOrder(stageKey, nextItemIds) {
+  await api.post(`/api/projects/${projectId}/stage-checklists/${encodeURIComponent(stageKey)}/reorder`, {
+    item_ids: nextItemIds,
+  });
+  await loadChecklist();
 }
 
 function bindBoardDragEvents() {
@@ -393,6 +512,7 @@ async function loadChecklist() {
 async function loadTemplates() {
   templates = await api.get("/api/templates");
   renderTemplateSelect();
+  scheduleStageListHeightAdjustment();
 }
 
 async function loadParticipants() {
@@ -400,6 +520,16 @@ async function loadParticipants() {
   participants = await api.get(`/api/projects/${projectId}/participants`);
   renderParticipants();
 }
+
+window.addEventListener("resize", () => {
+  scheduleStageListHeightAdjustment();
+});
+
+els.taskSortSelect?.addEventListener("change", (e) => {
+  currentTaskSort = normalizeTaskSortKey(e.target.value);
+  syncTaskSortToUrl();
+  renderStages();
+});
 
 els.logoutBtn.addEventListener("click", async () => {
   await api.post("/api/auth/logout", {});
@@ -519,6 +649,62 @@ els.stageList?.addEventListener("click", async (e) => {
   }
 });
 
+els.stageList?.addEventListener("dragstart", (e) => {
+  const item = e.target.closest("[data-stage-drag-id]");
+  if (!item) return;
+  draggingStageManagerId = Number(item.getAttribute("data-stage-drag-id"));
+  item.classList.add("dragging");
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(draggingStageManagerId));
+  }
+});
+
+els.stageList?.addEventListener("dragend", () => {
+  draggingStageManagerId = null;
+  clearDragIndicators(els.stageList);
+});
+
+els.stageList?.addEventListener("dragover", (e) => {
+  if (!draggingStageManagerId) return;
+  const target = e.target.closest("[data-stage-drag-id]");
+  if (!target) return;
+  const targetId = Number(target.getAttribute("data-stage-drag-id"));
+  if (!Number.isFinite(targetId) || targetId === draggingStageManagerId) return;
+  e.preventDefault();
+  applyDragIndicator(els.stageList, target, getDragPlacement(e, target));
+});
+
+els.stageList?.addEventListener("dragleave", (e) => {
+  const relatedTarget = e.relatedTarget;
+  if (relatedTarget && els.stageList.contains(relatedTarget)) return;
+  els.stageList.querySelectorAll(".drag-target-before, .drag-target-after").forEach((node) => {
+    node.classList.remove("drag-target-before", "drag-target-after");
+  });
+});
+
+els.stageList?.addEventListener("drop", async (e) => {
+  const target = e.target.closest("[data-stage-drag-id]");
+  if (!draggingStageManagerId || !target) return;
+  const targetId = Number(target.getAttribute("data-stage-drag-id"));
+  if (!Number.isFinite(targetId) || targetId === draggingStageManagerId) return;
+  e.preventDefault();
+
+  const placement = getDragPlacement(e, target);
+  const currentOrder = projectStages.map((stage) => Number(stage.id));
+  const nextOrder = moveIdBeforeOrAfter(currentOrder, draggingStageManagerId, targetId, placement === "after");
+  clearDragIndicators(els.stageList);
+  draggingStageManagerId = null;
+
+  if (JSON.stringify(currentOrder) === JSON.stringify(nextOrder)) return;
+
+  try {
+    await saveStageOrder(nextOrder);
+  } catch (err) {
+    alert(parseApiError(err));
+  }
+});
+
 els.applyTemplateBtn.addEventListener("click", async () => {
   const templateId = Number(els.templateSelect.value);
   if (!templateId) return;
@@ -611,6 +797,75 @@ els.stages?.addEventListener("click", async (e) => {
   await loadChecklist();
 });
 
+els.stages?.addEventListener("dragstart", (e) => {
+  const item = e.target.closest("[data-stage-checklist-drag-id]");
+  if (!item || editingChecklistId !== null) return;
+  draggingStageChecklistId = Number(item.getAttribute("data-stage-checklist-drag-id"));
+  draggingStageChecklistStageKey = String(item.getAttribute("data-stage-checklist-stage") || "");
+  item.classList.add("dragging");
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(draggingStageChecklistId));
+  }
+});
+
+els.stages?.addEventListener("dragend", () => {
+  draggingStageChecklistId = null;
+  draggingStageChecklistStageKey = null;
+  clearDragIndicators(els.stages);
+});
+
+els.stages?.addEventListener("dragover", (e) => {
+  if (!draggingStageChecklistId || !draggingStageChecklistStageKey) return;
+  const target = e.target.closest("[data-stage-checklist-drag-id]");
+  if (!target) return;
+  const targetId = Number(target.getAttribute("data-stage-checklist-drag-id"));
+  const targetStageKey = String(target.getAttribute("data-stage-checklist-stage") || "");
+  if (!Number.isFinite(targetId) || targetId === draggingStageChecklistId) return;
+  if (targetStageKey !== draggingStageChecklistStageKey) return;
+  e.preventDefault();
+  applyDragIndicator(els.stages, target, getDragPlacement(e, target));
+});
+
+els.stages?.addEventListener("dragleave", (e) => {
+  const relatedTarget = e.relatedTarget;
+  if (relatedTarget && els.stages.contains(relatedTarget)) return;
+  els.stages.querySelectorAll(".drag-target-before, .drag-target-after").forEach((node) => {
+    node.classList.remove("drag-target-before", "drag-target-after");
+  });
+});
+
+els.stages?.addEventListener("drop", async (e) => {
+  const target = e.target.closest("[data-stage-checklist-drag-id]");
+  if (!draggingStageChecklistId || !draggingStageChecklistStageKey || !target) return;
+
+  const targetId = Number(target.getAttribute("data-stage-checklist-drag-id"));
+  const targetStageKey = String(target.getAttribute("data-stage-checklist-stage") || "");
+  if (!Number.isFinite(targetId) || targetId === draggingStageChecklistId) return;
+  if (targetStageKey !== draggingStageChecklistStageKey) return;
+  e.preventDefault();
+
+  const placement = getDragPlacement(e, target);
+  const currentOrder = checklistItems
+    .filter((item) => item.stage === draggingStageChecklistStageKey)
+    .sort((a, b) => Number(a.position || 0) - Number(b.position || 0))
+    .map((item) => Number(item.id));
+  const nextOrder = moveIdBeforeOrAfter(currentOrder, draggingStageChecklistId, targetId, placement === "after");
+
+  clearDragIndicators(els.stages);
+  const stageKey = draggingStageChecklistStageKey;
+  draggingStageChecklistId = null;
+  draggingStageChecklistStageKey = null;
+
+  if (JSON.stringify(currentOrder) === JSON.stringify(nextOrder)) return;
+
+  try {
+    await saveStageChecklistOrder(stageKey, nextOrder);
+  } catch (err) {
+    alert(parseApiError(err));
+  }
+});
+
 els.board?.addEventListener("click", async (e) => {
   const editContentBtn = e.target.closest("[data-edit-content-board]");
   if (editContentBtn) {
@@ -665,6 +920,7 @@ Promise.resolve()
       loadTemplates(),
       loadParticipants(),
     ]);
+    scheduleStageListHeightAdjustment();
     optionalLoads.forEach((x) => {
       if (x.status === "rejected") console.warn(x.reason);
     });

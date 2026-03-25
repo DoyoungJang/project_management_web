@@ -26,6 +26,9 @@ const els = {
   projectTimelineFilterClearAll: document.getElementById("project-timeline-filter-clear-all"),
   projectTimelineSortSelect: document.getElementById("project-timeline-sort-select"),
   projectTimelineCursorDate: document.getElementById("project-timeline-cursor-date"),
+  projectTimelineLegend: document.getElementById("project-timeline-legend"),
+  projectTimelineEmpty: document.getElementById("project-timeline-empty"),
+  projectTimelineScroll: document.getElementById("project-timeline-scroll"),
   projectTimeline: document.getElementById("project-timeline"),
   projectList: document.getElementById("project-list"),
   upcomingFilter: document.getElementById("upcoming-filter"),
@@ -102,6 +105,34 @@ function projectStatusColor(raw) {
   return map[raw] || "#2a6f97";
 }
 
+function renderProjectTimelineLegend() {
+  if (!els.projectTimelineLegend) return;
+
+  const statusLegend = ["planned", "active", "done"]
+    .map(
+      (status) => `
+        <span class="gantt-legend__item">
+          <span class="gantt-legend__swatch" style="background:${projectStatusColor(status)}"></span>
+          ${escapeHtml(statusLabel(status))}
+        </span>
+      `
+    )
+    .join("");
+
+  const markerLegend = `
+    <span class="gantt-legend__item gantt-legend__item--marker">
+      <span class="gantt-legend__swatch" style="background:#0f6d66"></span>
+      오늘
+    </span>
+    <span class="gantt-legend__item gantt-legend__item--marker">
+      <span class="gantt-legend__swatch" style="background:#c0362c"></span>
+      프로젝트 마감
+    </span>
+  `;
+
+  els.projectTimelineLegend.innerHTML = `${statusLegend}${markerLegend}`;
+}
+
 function parseDateOnly(value) {
   const raw = String(value || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
@@ -155,6 +186,118 @@ function clampNumber(value, min, max) {
 
 function formatProjectRange(startRaw, endRaw) {
   return `${startRaw || "-"} ~ ${endRaw || "-"}`;
+}
+
+function buildProjectTimelineDays(start, end) {
+  const days = [];
+  let cursor = new Date(start);
+  while (cursor <= end) {
+    days.push(new Date(cursor));
+    cursor = addDays(cursor, 1);
+  }
+  return days;
+}
+
+function formatProjectTimelineMonthLabel(date, forceYear = false) {
+  if (forceYear) return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}`;
+  return `${date.getMonth() + 1}월`;
+}
+
+function formatProjectTimelineDayLabel(date) {
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function getProjectTimelineMonthSerial(date) {
+  return date.getFullYear() * 12 + date.getMonth();
+}
+
+function getProjectTimelineHeaderConfig(days, cellWidth) {
+  const dayCount = days.length;
+  const trackWidth = Math.max(240, dayCount * Math.max(cellWidth, 1));
+  const monthStarts = days.filter((day) => day.getDate() === 1);
+  const maxLabels = Math.max(4, Math.floor(trackWidth / 72));
+
+  if (dayCount <= 45 && cellWidth >= 14) {
+    return { mode: "day", step: Math.max(1, Math.ceil(dayCount / maxLabels)) };
+  }
+
+  if (dayCount <= 120 && cellWidth >= 6) {
+    return { mode: "day", step: Math.max(7, Math.ceil(dayCount / maxLabels)) };
+  }
+
+  if (dayCount <= 540) {
+    return {
+      mode: "month",
+      step: Math.max(1, Math.ceil(Math.max(monthStarts.length, 1) / maxLabels)),
+    };
+  }
+
+  return {
+    mode: "year-month",
+    step: Math.max(1, Math.ceil(Math.max(monthStarts.length, 1) / maxLabels)),
+  };
+}
+
+function getProjectTimelineHeaderLabel(day, index, days, config) {
+  const firstMonthSerial = getProjectTimelineMonthSerial(days[0]);
+  const monthOffset = getProjectTimelineMonthSerial(day) - firstMonthSerial;
+  const isFirst = index === 0;
+  const isLast = index === days.length - 1;
+  const isMonthStart = day.getDate() === 1;
+  const previousDay = index > 0 ? days[index - 1] : null;
+  const isYearBoundary = !previousDay || previousDay.getFullYear() !== day.getFullYear();
+
+  if (config.mode === "day") {
+    if (isFirst || isLast) return formatProjectTimelineMonthLabel(day, true);
+    const shouldLabel = isMonthStart || index % config.step === 0;
+    if (!shouldLabel) return "";
+    return isYearBoundary ? formatProjectTimelineMonthLabel(day, true) : formatProjectTimelineDayLabel(day);
+  }
+
+  if (!isMonthStart && !isFirst && !isLast) return "";
+
+  if (config.mode === "month") {
+    if (isFirst || isLast) return formatProjectTimelineMonthLabel(day, true);
+    if (monthOffset % config.step !== 0 && !isYearBoundary) return "";
+    return isYearBoundary ? formatProjectTimelineMonthLabel(day, true) : formatProjectTimelineMonthLabel(day);
+  }
+
+  if (isFirst || isLast) return formatProjectTimelineMonthLabel(day, true);
+  if (monthOffset % config.step !== 0 && !isYearBoundary) return "";
+  return formatProjectTimelineMonthLabel(day, true);
+}
+
+function renderProjectTimelineDayCell(day, index, days, config) {
+  const label = getProjectTimelineHeaderLabel(day, index, days, config);
+  if (!label) return "";
+
+  const isBoundary = index === 0 || index === days.length - 1 || day.getDate() === 1;
+  const weekday = projectTimelineWeekdayFormatter.format(day);
+
+  return `
+    <span class="gantt-day__date">${escapeHtml(label)}</span>
+    <span class="gantt-day__weekday${isBoundary ? " is-strong" : ""}">${escapeHtml(weekday)}</span>
+  `;
+}
+
+function setProjectTimelineEmpty(message) {
+  if (els.projectTimeline) {
+    els.projectTimeline.innerHTML = "";
+  }
+  if (els.projectTimelineScroll) {
+    els.projectTimelineScroll.classList.add("hidden");
+  }
+  if (els.projectTimelineEmpty) {
+    els.projectTimelineEmpty.textContent = message;
+    els.projectTimelineEmpty.classList.remove("hidden");
+  } else if (els.projectTimeline) {
+    els.projectTimeline.innerHTML = `<div class="item gantt-empty">${escapeHtml(message)}</div>`;
+  }
+}
+
+function showProjectTimelineContent() {
+  els.projectTimelineEmpty?.classList.add("hidden");
+  els.projectTimelineScroll?.classList.remove("hidden");
 }
 
 const initialProjectTimelineFilter = parseProjectTimelineFilterSelection(pageParams.get("visible_projects"));
@@ -332,9 +475,7 @@ function formatProjectTimelineCursorDate(date) {
 
 function hideProjectTimelineCursorDate() {
   if (currentProjectTimelineHoveredTrack) {
-    currentProjectTimelineHoveredTrack
-      .querySelector(".project-overview-gantt__cursor-line")
-      ?.classList.add("hidden");
+    currentProjectTimelineHoveredTrack.querySelector(".gantt-cursor-line")?.classList.add("hidden");
     currentProjectTimelineHoveredTrack = null;
   }
   if (els.projectTimelineCursorDate) {
@@ -355,12 +496,10 @@ function showProjectTimelineCursorDate(track, clientX, clientY) {
     Math.max(0, Math.floor(offsetX / Math.max(cellWidth, 1)))
   );
   const lineLeft = Math.min(rect.width - 1, Math.max(0, dayIndex * cellWidth + cellWidth / 2));
-  const line = track.querySelector(".project-overview-gantt__cursor-line");
+  const line = track.querySelector(".gantt-cursor-line");
 
   if (currentProjectTimelineHoveredTrack && currentProjectTimelineHoveredTrack !== track) {
-    currentProjectTimelineHoveredTrack
-      .querySelector(".project-overview-gantt__cursor-line")
-      ?.classList.add("hidden");
+    currentProjectTimelineHoveredTrack.querySelector(".gantt-cursor-line")?.classList.add("hidden");
   }
 
   currentProjectTimelineHoveredTrack = track;
@@ -458,6 +597,25 @@ function buildProjectTimelineBands(rangeStart, rangeEnd) {
         `
       )
       .join(""),
+  };
+}
+
+function getProjectTimelineMetrics(totalDays) {
+  const isCompact = window.innerWidth <= 900;
+  const containerWidth = Math.max(
+    320,
+    Math.floor(els.projectTimeline?.getBoundingClientRect().width || window.innerWidth - 96)
+  );
+  const labelWidth = isCompact ? 0 : 240;
+  const rowGap = isCompact ? 0 : 14;
+  const trackShellPadding = 26;
+  const trackWidth = Math.max(260, containerWidth - labelWidth - rowGap - trackShellPadding);
+  const minCellWidth = totalDays > 730 ? 0.45 : totalDays > 365 ? 0.7 : totalDays > 180 ? 1 : 1.8;
+  const cellWidth = Math.max(trackWidth / Math.max(totalDays, 1), minCellWidth);
+
+  return {
+    rowTemplate: isCompact ? "1fr" : "240px auto",
+    cellWidth,
   };
 }
 
@@ -641,8 +799,8 @@ function renderProjectTimeline() {
   }
 
   const totalDays = diffDays(appliedRange.start, appliedRange.end) + 1;
-  const cellWidth = clampNumber(960 / Math.max(totalDays, 1), 3, 14);
-  const styleVars = `--project-overview-days:${totalDays}; --project-overview-cell:${cellWidth}px;`;
+  const metrics = getProjectTimelineMetrics(totalDays);
+  const styleVars = `--project-overview-days:${totalDays}; --project-overview-cell:${metrics.cellWidth}px;`;
   const { monthBandsHtml, monthLabelsHtml } = buildProjectTimelineBands(appliedRange.start, appliedRange.end);
   currentProjectTimelineRenderState = {
     rangeStart: new Date(appliedRange.start),
@@ -659,7 +817,7 @@ function renderProjectTimeline() {
           : null;
       const barColor = projectStatusColor(project.status);
       return `
-        <div class="project-overview-gantt__row" style="grid-template-columns:240px auto;">
+        <div class="project-overview-gantt__row" style="grid-template-columns:${metrics.rowTemplate};">
           <div class="project-overview-gantt__label">
             <div class="item__head">
               <strong>${escapeHtml(project.name)}</strong>
@@ -698,7 +856,7 @@ function renderProjectTimeline() {
   els.projectTimeline.innerHTML = `
     <div class="project-overview-gantt__scroll">
       <div class="project-overview-gantt__board">
-        <div class="project-overview-gantt__row project-overview-gantt__row--header" style="grid-template-columns:240px auto;">
+        <div class="project-overview-gantt__row project-overview-gantt__row--header" style="grid-template-columns:${metrics.rowTemplate};">
           <div class="project-overview-gantt__label project-overview-gantt__label--header">
             <span class="project-overview-gantt__eyebrow">Project Timeline</span>
             <strong>프로젝트</strong>
@@ -713,6 +871,545 @@ function renderProjectTimeline() {
         </div>
         ${rowsHtml}
       </div>
+    </div>
+  `;
+}
+
+function hideProjectTimelineCursorDate() {
+  if (currentProjectTimelineHoveredTrack) {
+    currentProjectTimelineHoveredTrack.querySelector(".gantt-cursor-line")?.classList.add("hidden");
+    currentProjectTimelineHoveredTrack = null;
+  }
+  if (els.projectTimelineCursorDate) {
+    els.projectTimelineCursorDate.classList.add("hidden");
+  }
+}
+
+function showProjectTimelineCursorDate(track, clientX, clientY) {
+  if (!currentProjectTimelineRenderState || !els.projectTimelineCursorDate) return;
+
+  const rect = track.getBoundingClientRect();
+  if (!rect.width || currentProjectTimelineRenderState.totalDays <= 0) return;
+
+  const cellWidth = rect.width / currentProjectTimelineRenderState.totalDays;
+  const offsetX = Math.min(Math.max(0, clientX - rect.left), Math.max(rect.width - 1, 0));
+  const dayIndex = Math.min(
+    currentProjectTimelineRenderState.totalDays - 1,
+    Math.max(0, Math.floor(offsetX / Math.max(cellWidth, 1)))
+  );
+  const lineLeft = Math.min(rect.width - 1, Math.max(0, dayIndex * cellWidth + cellWidth / 2));
+  const line = track.querySelector(".gantt-cursor-line");
+
+  if (currentProjectTimelineHoveredTrack && currentProjectTimelineHoveredTrack !== track) {
+    currentProjectTimelineHoveredTrack.querySelector(".gantt-cursor-line")?.classList.add("hidden");
+  }
+
+  currentProjectTimelineHoveredTrack = track;
+  if (line) {
+    line.style.left = `${lineLeft}px`;
+    line.classList.remove("hidden");
+  }
+
+  const hoveredDate = addDays(currentProjectTimelineRenderState.rangeStart, dayIndex);
+  const tooltip = els.projectTimelineCursorDate;
+  tooltip.textContent = formatProjectTimelineCursorDate(hoveredDate);
+  tooltip.classList.remove("hidden");
+
+  const margin = 12;
+  const offset = 16;
+  const tooltipRect = tooltip.getBoundingClientRect();
+  let left = clientX + offset;
+  let top = clientY + offset;
+
+  if (left + tooltipRect.width > window.innerWidth - margin) {
+    left = clientX - tooltipRect.width - offset;
+  }
+  if (top + tooltipRect.height > window.innerHeight - margin) {
+    top = clientY - tooltipRect.height - offset;
+  }
+
+  tooltip.style.left = `${Math.max(margin, left)}px`;
+  tooltip.style.top = `${Math.max(margin, top)}px`;
+}
+
+function buildProjectTimelineBands(days, cellWidth, headerConfig) {
+  if (!days.length) {
+    return {
+      monthBandsHtml: "",
+      trackBandsHtml: "",
+      headerLabelsHtml: "",
+    };
+  }
+
+  const bands = [];
+  let startIndex = 0;
+  let bandIndex = 0;
+
+  for (let index = 1; index <= days.length; index += 1) {
+    const current = days[index];
+    const previous = days[index - 1];
+    const crossedMonth =
+      index === days.length ||
+      current.getMonth() !== previous.getMonth() ||
+      current.getFullYear() !== previous.getFullYear();
+
+    if (!crossedMonth) continue;
+
+    const startDay = days[startIndex];
+    bands.push({
+      day: startDay,
+      startIndex,
+      span: index - startIndex,
+      isEven: bandIndex % 2 === 0,
+      isYearBoundary: startDay.getMonth() === 0,
+    });
+    startIndex = index;
+    bandIndex += 1;
+  }
+
+  const headerLabelsHtml =
+    headerConfig?.mode === "day"
+      ? ""
+      : (() => {
+          const lastIndex = days.length - 1;
+          const startText = formatProjectTimelineMonthLabel(days[0], true);
+          const endText = formatProjectTimelineMonthLabel(days[lastIndex], true);
+          const minGapPx = headerConfig?.mode === "year-month" ? 150 : 110;
+          const edgeGapPx = 84;
+
+          const rawLabels = days
+            .map((day, index) => ({
+              day,
+              index,
+              text: getProjectTimelineHeaderLabel(day, index, days, headerConfig),
+              isYearBoundary: index === 0 || index === lastIndex || day.getMonth() === 0,
+            }))
+            .filter((entry) => entry.text && entry.index !== 0 && entry.index !== lastIndex);
+
+          const filtered = [];
+
+          for (const entry of rawLabels) {
+            const distanceFromStart = entry.index * cellWidth;
+            const distanceFromEnd = (lastIndex - entry.index) * cellWidth;
+            const previous = filtered[filtered.length - 1];
+            const gapFromPrevious = previous
+              ? (entry.index - previous.index) * cellWidth
+              : Number.POSITIVE_INFINITY;
+
+            if (distanceFromStart < edgeGapPx || distanceFromEnd < edgeGapPx) continue;
+            if (gapFromPrevious < minGapPx && !entry.isYearBoundary) continue;
+            if (previous?.isYearBoundary && gapFromPrevious < minGapPx * 0.8) continue;
+
+            filtered.push(entry);
+          }
+
+          const middleLabels = filtered
+            .map(
+              (entry) => `
+                <span
+                  class="gantt-header-label ${entry.isYearBoundary ? "is-year-boundary" : ""}"
+                  style="left:calc(${entry.index} * var(--gantt-cell-width));"
+                  title="${toDateKey(entry.day)}"
+                >
+                  ${escapeHtml(entry.text)}
+                </span>
+              `
+            )
+            .join("");
+
+          return `
+            <span class="gantt-header-label is-start" title="${toDateKey(days[0])}">
+              ${escapeHtml(startText)}
+            </span>
+            ${middleLabels}
+            <span class="gantt-header-label is-end" title="${toDateKey(days[lastIndex])}">
+              ${escapeHtml(endText)}
+            </span>
+          `;
+        })();
+
+  return {
+    monthBandsHtml: `
+      <div class="gantt-month-bands">
+        ${bands
+          .map(
+            (band) => `
+              <span
+                class="gantt-month-band ${band.isYearBoundary ? "is-year-start" : ""}"
+                style="left:calc(${band.startIndex} * var(--gantt-cell-width)); width:calc(${band.span} * var(--gantt-cell-width));"
+              ></span>
+            `
+          )
+          .join("")}
+      </div>
+    `,
+    trackBandsHtml: `
+      <div class="gantt-track-bands">
+        ${bands
+          .map(
+            (band) => `
+              <span
+                class="gantt-track-band ${band.isEven ? "is-even" : "is-odd"} ${
+                  band.isYearBoundary ? "is-year-start" : ""
+                }"
+                style="left:calc(${band.startIndex} * var(--gantt-cell-width)); width:calc(${band.span} * var(--gantt-cell-width));"
+              ></span>
+            `
+          )
+          .join("")}
+      </div>
+    `,
+    headerLabelsHtml,
+  };
+}
+
+function buildProjectTimelineMarkerHtml(todayIndex, dueIndex) {
+  return `
+    ${
+      todayIndex !== null && todayIndex !== undefined
+        ? `<span class="gantt-marker gantt-marker--today" style="left:calc(${todayIndex} * var(--gantt-cell-width))"></span>`
+        : ""
+    }
+    ${
+      dueIndex !== null && dueIndex !== undefined
+        ? `<span class="gantt-marker gantt-marker--due" style="left:calc(${dueIndex} * var(--gantt-cell-width))"></span>`
+        : ""
+    }
+  `;
+}
+
+function formatProjectTimelineDuration(start, end) {
+  return `${diffDays(start, end) + 1}d`;
+}
+
+function buildProjectTimelineLanes(projects) {
+  const lanes = [];
+
+  projects.forEach((project) => {
+    const startTime = project.visibleStart.getTime();
+    const endTime = project.visibleEnd.getTime();
+    let targetLane = null;
+
+    for (const lane of lanes) {
+      if (startTime > lane.lastEndTime) {
+        targetLane = lane;
+        break;
+      }
+    }
+
+    if (!targetLane) {
+      targetLane = {
+        items: [],
+        lastEndTime: Number.NEGATIVE_INFINITY,
+      };
+      lanes.push(targetLane);
+    }
+
+    targetLane.items.push(project);
+    targetLane.lastEndTime = endTime;
+  });
+
+  return lanes;
+}
+
+function renderProjectTimelineRows({
+  projects,
+  appliedRange,
+  styleVars,
+  labelWidth,
+  todayIndex,
+  trackBandsHtml,
+  headerMode,
+}) {
+  const packedProjects = [...projects].sort((a, b) => {
+    return (
+      a.visibleStart - b.visibleStart ||
+      a.visibleEnd - b.visibleEnd ||
+      a.start - b.start ||
+      String(a.name || "").localeCompare(String(b.name || ""), "ko", { sensitivity: "base" })
+    );
+  });
+  const lanes = buildProjectTimelineLanes(packedProjects);
+
+  return lanes
+    .map((lane, laneIndex) => {
+      if (lane.items.length === 1) {
+        const project = lane.items[0];
+        const barLeft = diffDays(appliedRange.start, project.visibleStart);
+        const barSpan = diffDays(project.visibleStart, project.visibleEnd) + 1;
+        const dueIndex =
+          project.due && project.due >= appliedRange.start && project.due <= appliedRange.end
+            ? diffDays(appliedRange.start, project.due)
+            : null;
+        const barColor = projectStatusColor(project.status);
+        const durationLabel = formatProjectTimelineDuration(project.start, project.end);
+
+        return `
+          <div class="gantt-row gantt-row--task" style="grid-template-columns:${labelWidth}px auto;">
+            <div class="gantt-label gantt-label--card project-overview-gantt__label-card">
+              <div class="gantt-label__top">
+                <span
+                  class="gantt-stage-pill"
+                  style="background:${barColor}18; color:${barColor}; border-color:${barColor}33;"
+                >
+                  ${escapeHtml(statusLabel(project.status))}
+                </span>
+                <span class="gantt-duration-pill">${durationLabel}</span>
+              </div>
+              <div class="project-overview-gantt__title-row">
+                <strong class="gantt-task-title project-overview-gantt__title">${escapeHtml(project.name)}</strong>
+                <span class="project-overview-gantt__owner">Owner ${escapeHtml(project.owner)}</span>
+              </div>
+              <div class="project-overview-gantt__facts">
+                <span class="project-overview-gantt__fact">
+                  <span class="project-overview-gantt__fact-label">시작</span>
+                  <span class="project-overview-gantt__fact-value">${escapeHtml(project.schedule_start_date || toDateKey(project.start))}</span>
+                </span>
+                <span class="project-overview-gantt__fact">
+                  <span class="project-overview-gantt__fact-label">종료</span>
+                  <span class="project-overview-gantt__fact-value">${escapeHtml(project.schedule_end_date || toDateKey(project.end))}</span>
+                </span>
+                ${
+                  project.due_date
+                    ? `
+                      <span class="project-overview-gantt__fact project-overview-gantt__fact--due">
+                        <span class="project-overview-gantt__fact-label">마감</span>
+                        <span class="project-overview-gantt__fact-value">${escapeHtml(project.due_date)}</span>
+                      </span>
+                    `
+                    : ""
+                }
+              </div>
+            </div>
+            <div class="gantt-track-shell">
+              <div class="gantt-track ${headerMode !== "day" ? "gantt-track--overview" : ""}" style="${styleVars}">
+                ${headerMode !== "day" ? trackBandsHtml : ""}
+                ${buildProjectTimelineMarkerHtml(todayIndex, dueIndex)}
+                <button
+                  type="button"
+                  class="gantt-bar"
+                  data-open-project-gantt="${project.id}"
+                  style="left:calc(${barLeft} * var(--gantt-cell-width)); width:calc(${barSpan} * var(--gantt-cell-width) - 8px); background:${barColor};"
+                  title="${escapeHtml(project.name)} 간트 차트 열기"
+                  aria-label="${escapeHtml(project.name)} 간트 차트 열기"
+                >
+                  <span class="gantt-bar__title">${escapeHtml(project.name)}</span>
+                  ${barSpan >= 4 ? `<span class="gantt-bar__duration">${durationLabel}</span>` : ""}
+                </button>
+                <span class="gantt-cursor-line hidden" aria-hidden="true"></span>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      const laneBarsHtml = lane.items
+        .map((project) => {
+          const barLeft = diffDays(appliedRange.start, project.visibleStart);
+          const barSpan = diffDays(project.visibleStart, project.visibleEnd) + 1;
+          const dueIndex =
+            project.due && project.due >= appliedRange.start && project.due <= appliedRange.end
+              ? diffDays(appliedRange.start, project.due)
+              : null;
+          const barColor = projectStatusColor(project.status);
+          const durationLabel = formatProjectTimelineDuration(project.start, project.end);
+
+          return `
+            ${
+              dueIndex !== null
+                ? `<span class="gantt-marker gantt-marker--due" style="left:calc(${dueIndex} * var(--gantt-cell-width))"></span>`
+                : ""
+            }
+            <button
+              type="button"
+              class="gantt-bar"
+              data-open-project-gantt="${project.id}"
+              style="left:calc(${barLeft} * var(--gantt-cell-width)); width:calc(${barSpan} * var(--gantt-cell-width) - 8px); background:${barColor};"
+              title="${escapeHtml(project.name)} 간트 차트 열기"
+              aria-label="${escapeHtml(project.name)} 간트 차트 열기"
+            >
+              <span class="gantt-bar__title">${escapeHtml(project.name)}</span>
+              ${barSpan >= 4 ? `<span class="gantt-bar__duration">${durationLabel}</span>` : ""}
+            </button>
+          `;
+        })
+        .join("");
+
+      const laneItemsHtml = lane.items
+        .map((project) => {
+          const barColor = projectStatusColor(project.status);
+          const rangeLabel = `${project.schedule_start_date || toDateKey(project.start)} ~ ${
+            project.schedule_end_date || toDateKey(project.end)
+          }`;
+          return `
+            <button
+              type="button"
+              class="gantt-lane-chip"
+              data-open-project-gantt="${project.id}"
+              style="--lane-chip-bg:${barColor}18; --lane-chip-border:${barColor}33; --lane-chip-fg:${barColor};"
+              title="${escapeHtml(project.name)} | ${escapeHtml(rangeLabel)}"
+              aria-label="${escapeHtml(project.name)} 간트 차트 열기"
+            >
+              ${escapeHtml(project.name)}
+            </button>
+          `;
+        })
+        .join("");
+
+      return `
+        <div class="gantt-row gantt-row--task" style="grid-template-columns:${labelWidth}px auto;">
+          <div class="gantt-label gantt-label--card gantt-lane-card">
+            <div class="gantt-label__top">
+              <span class="gantt-duration-pill">겹침 레인 ${laneIndex + 1}</span>
+              <span class="gantt-duration-pill">${lane.items.length}개 일정</span>
+            </div>
+            <div class="gantt-lane-chip-list">
+              ${laneItemsHtml}
+            </div>
+          </div>
+          <div class="gantt-track-shell">
+            <div class="gantt-track ${headerMode !== "day" ? "gantt-track--overview" : ""}" style="${styleVars}">
+              ${headerMode !== "day" ? trackBandsHtml : ""}
+              ${buildProjectTimelineMarkerHtml(todayIndex, null)}
+              ${laneBarsHtml}
+              <span class="gantt-cursor-line hidden" aria-hidden="true"></span>
+            </div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function getProjectTimelineMetrics(totalDays) {
+  const labelWidth = window.innerWidth <= 900 ? 200 : 260;
+  const viewportWidth = Math.max(
+    320,
+    Math.floor(els.projectTimelineScroll?.getBoundingClientRect().width || window.innerWidth - 96)
+  );
+  const trackWidth = Math.max(240, viewportWidth - labelWidth - 16);
+  const cellWidth = clampNumber(trackWidth / Math.max(totalDays, 1), 2, 38);
+
+  return {
+    labelWidth,
+    cellWidth,
+  };
+}
+
+function renderProjectTimeline() {
+  if (!els.projectTimeline) return;
+  hideProjectTimelineCursorDate();
+  currentProjectTimelineRenderState = null;
+  renderProjectTimelineLegend();
+
+  const timelineProjects = getProjectTimelineProjects();
+  renderProjectTimelineFilterPanel(timelineProjects);
+  syncProjectTimelineUrl();
+
+  if (!timelineProjects.length) {
+    const customRange = getProjectTimelineAppliedRange(null);
+    syncProjectTimelineInputs(customRange);
+    setProjectTimelineEmpty("표시할 프로젝트 일정이 없습니다.");
+    return;
+  }
+
+  const filteredProjects = timelineProjects.filter((project) => isProjectTimelineVisible(project));
+  if (!filteredProjects.length) {
+    const customRange = getProjectTimelineAppliedRange(null);
+    syncProjectTimelineInputs(customRange);
+    setProjectTimelineEmpty("선택된 프로젝트가 없습니다.");
+    return;
+  }
+
+  const autoRange = getProjectTimelineAutoRange(filteredProjects);
+  const appliedRange = getProjectTimelineAppliedRange(autoRange);
+  if (!appliedRange) {
+    setProjectTimelineEmpty("표시할 프로젝트 일정이 없습니다.");
+    return;
+  }
+
+  syncProjectTimelineInputs(appliedRange);
+
+  const visibleProjects = filteredProjects
+    .map((project) => {
+      if (project.end < appliedRange.start || project.start > appliedRange.end) return null;
+
+      return {
+        ...project,
+        visibleStart: project.start < appliedRange.start ? appliedRange.start : project.start,
+        visibleEnd: project.end > appliedRange.end ? appliedRange.end : project.end,
+      };
+    })
+    .filter(Boolean);
+
+  if (!visibleProjects.length) {
+    setProjectTimelineEmpty("선택한 범위에 표시할 프로젝트 일정이 없습니다.");
+    return;
+  }
+
+  showProjectTimelineContent();
+
+  const days = buildProjectTimelineDays(appliedRange.start, appliedRange.end);
+  const totalDays = days.length;
+  const metrics = getProjectTimelineMetrics(totalDays);
+  const styleVars = `--gantt-days:${totalDays}; --gantt-cell-width:${metrics.cellWidth}px;`;
+  const headerConfig = getProjectTimelineHeaderConfig(days, metrics.cellWidth);
+  const { monthBandsHtml, trackBandsHtml, headerLabelsHtml } = buildProjectTimelineBands(
+    days,
+    metrics.cellWidth,
+    headerConfig
+  );
+  const today = parseDateOnly(toDateKey(new Date()));
+  const todayIndex = today && today >= appliedRange.start && today <= appliedRange.end ? diffDays(appliedRange.start, today) : null;
+  currentProjectTimelineRenderState = {
+    rangeStart: new Date(appliedRange.start),
+    totalDays,
+  };
+
+  const headerDaysHtml = days
+    .map((day, index) => {
+      const classes = [
+        "gantt-day",
+        day.getDay() === 0 || day.getDay() === 6 ? "is-weekend" : "",
+        day.getDay() === 1 ? "is-week-start" : "",
+        day.getDate() === 1 ? "is-month-start" : "",
+        headerConfig.mode === "day" ? "is-day-mode" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return `<div class="${classes}" title="${toDateKey(day)}">${
+        headerConfig.mode === "day" ? renderProjectTimelineDayCell(day, index, days, headerConfig) : ""
+      }</div>`;
+    })
+    .join("");
+
+  const rowsHtml = renderProjectTimelineRows({
+    projects: visibleProjects,
+    appliedRange,
+    styleVars,
+    labelWidth: metrics.labelWidth,
+    todayIndex,
+    trackBandsHtml,
+    headerMode: headerConfig.mode,
+  });
+
+  els.projectTimeline.innerHTML = `
+    <div class="gantt-board">
+      <div class="gantt-row gantt-row--header" style="grid-template-columns:${metrics.labelWidth}px auto;">
+        <div class="gantt-label gantt-label--header-card">
+          <span class="gantt-label__eyebrow">Project Timeline</span>
+          <strong>프로젝트</strong>
+        </div>
+        <div class="gantt-track-shell gantt-track-shell--header">
+          <div class="gantt-days ${headerConfig.mode !== "day" ? "gantt-days--condensed gantt-days--overview" : ""}" style="${styleVars}">
+            ${monthBandsHtml}
+            ${headerDaysHtml}
+            ${headerLabelsHtml ? `<div class="gantt-header-labels">${headerLabelsHtml}</div>` : ""}
+            <span class="gantt-cursor-line hidden" aria-hidden="true"></span>
+          </div>
+        </div>
+      </div>
+      ${rowsHtml}
     </div>
   `;
 }
@@ -826,7 +1523,7 @@ els.projectList?.addEventListener("click", async (e) => {
   }
 });
 
-els.projectTimeline?.addEventListener("click", (e) => {
+els.projectTimelineScroll?.addEventListener("click", (e) => {
   const ganttBtn = e.target.closest("[data-open-project-gantt]");
   if (!ganttBtn) return;
   const id = ganttBtn.getAttribute("data-open-project-gantt");
@@ -893,17 +1590,21 @@ els.projectTimelineSortSelect?.addEventListener("change", (e) => {
   renderProjectTimeline();
 });
 
-els.projectTimeline?.addEventListener("mousemove", (e) => {
-  const track = e.target.closest(".project-overview-gantt__track");
-  if (!track || !els.projectTimeline.contains(track)) {
+els.projectTimelineScroll?.addEventListener("mousemove", (e) => {
+  const track = e.target.closest(".gantt-track, .gantt-days");
+  if (!track || !els.projectTimelineScroll.contains(track)) {
     hideProjectTimelineCursorDate();
     return;
   }
   showProjectTimelineCursorDate(track, e.clientX, e.clientY);
 });
 
-els.projectTimeline?.addEventListener("mouseleave", () => {
+els.projectTimelineScroll?.addEventListener("mouseleave", () => {
   hideProjectTimelineCursorDate();
+});
+
+window.addEventListener("resize", () => {
+  renderProjectTimeline();
 });
 
 els.todayNotifications?.addEventListener("click", (e) => {

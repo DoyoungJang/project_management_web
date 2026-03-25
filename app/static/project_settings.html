@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>프로젝트 설정</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260325_6" />
   </head>
   <body>
     <header class="hero">
@@ -85,7 +85,21 @@
             <div id="stage-list" class="list stage-list"></div>
           </article>
           <article class="work-subpanel">
-            <h3>작업 항목 관리</h3>
+            <div class="work-subpanel__top">
+              <h3>작업 항목 관리</h3>
+              <label class="gantt-filter-panel__sort project-task-sort">
+                <span class="gantt-filter-panel__sort-label">정렬</span>
+                <select id="task-sort-select">
+                  <option value="manual">기존 정렬</option>
+                  <option value="title">이름순</option>
+                  <option value="start_date">시작일 빠른순</option>
+                  <option value="target_date">종료일 빠른순</option>
+                </select>
+              </label>
+            </div>
+            <p id="task-sort-hint" class="item__meta project-task-sort__hint">
+              기존 정렬에서는 드래그로 순서를 직접 바꿀 수 있습니다.
+            </p>
             <div id="stage-container" class="stage-container stage-container--work"></div>
           </article>
         </div>
@@ -103,6 +117,6 @@
       })();
     </script>
     <script src="/static/common.js?v=20260321_15"></script>
-    <script src="/static/project.js?v=20260319_3"></script>
+    <script src="/static/project.js?v=20260325_5"></script>
   </body>
 </html>

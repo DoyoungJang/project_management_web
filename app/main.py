@@ -1092,6 +1092,80 @@ class ProjectStageUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
 
 
+class ProjectStageReorderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    stage_ids: list[int] = Field(min_length=1, max_length=300)
+
+
+class ProjectChecklistReorderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    item_ids: list[int] = Field(min_length=1, max_length=5000)
+
+
+def _reorder_project_stages_impl(
+    conn: sqlite3.Connection,
+    project_id: int,
+    payload: ProjectStageReorderRequest,
+    current_user: dict[str, Any],
+) -> dict[str, bool]:
+    require_project_owner(conn, project_id, current_user)
+    ensure_default_project_stages(conn, project_id)
+    rows = conn.execute(
+        "SELECT id FROM project_stages WHERE project_id=? ORDER BY position ASC, id ASC",
+        (project_id,),
+    ).fetchall()
+    existing_ids = [int(row["id"]) for row in rows]
+    requested_ids = [int(stage_id) for stage_id in payload.stage_ids]
+
+    if len(existing_ids) != len(requested_ids) or set(existing_ids) != set(requested_ids):
+        raise HTTPException(status_code=400, detail="Stage reorder payload does not match current stages.")
+
+    for position, stage_id in enumerate(requested_ids):
+        conn.execute(
+            "UPDATE project_stages SET position=? WHERE id=? AND project_id=?",
+            (position, stage_id, project_id),
+        )
+    conn.commit()
+    return {"ok": True}
+
+
+def _reorder_project_stage_checklists_impl(
+    conn: sqlite3.Connection,
+    project_id: int,
+    stage_key: str,
+    payload: ProjectChecklistReorderRequest,
+    current_user: dict[str, Any],
+) -> dict[str, bool]:
+    require_project_owner(conn, project_id, current_user)
+    ensure_project_stage_exists(conn, project_id, stage_key)
+    rows = conn.execute(
+        """
+        SELECT id
+        FROM project_checklist_items
+        WHERE project_id=? AND stage=?
+        ORDER BY position ASC, id ASC
+        """,
+        (project_id, stage_key),
+    ).fetchall()
+    existing_ids = [int(row["id"]) for row in rows]
+    requested_ids = [int(item_id) for item_id in payload.item_ids]
+
+    if len(existing_ids) != len(requested_ids) or set(existing_ids) != set(requested_ids):
+        raise HTTPException(status_code=400, detail="Checklist reorder payload does not match current stage items.")
+
+    for position, item_id in enumerate(requested_ids):
+        conn.execute(
+            """
+            UPDATE project_checklist_items
+            SET position=?
+            WHERE id=? AND project_id=? AND stage=?
+            """,
+            (position, item_id, project_id, stage_key),
+        )
+    conn.commit()
+    return {"ok": True}
+
+
 class TemplateCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=2, max_length=80)
@@ -1824,6 +1898,26 @@ def delete_project_stage(
     return {"ok": True}
 
 
+@app.post("/api/projects/{project_id}/stages/reorder")
+def reorder_project_stages(
+    project_id: int,
+    payload: ProjectStageReorderRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, bool]:
+    with get_db() as conn:
+        return _reorder_project_stages_impl(conn, project_id, payload, current_user)
+
+
+@app.post("/api/projects/{project_id}/stage-reorder")
+def reorder_project_stages_alias(
+    project_id: int,
+    payload: ProjectStageReorderRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, bool]:
+    with get_db() as conn:
+        return _reorder_project_stages_impl(conn, project_id, payload, current_user)
+
+
 @app.get("/api/projects/{project_id}/participants")
 def list_project_participants(
     project_id: int, current_user: dict[str, Any] = Depends(get_current_user)
@@ -2131,6 +2225,28 @@ def update_checklist_item(
         conn.commit()
         row = conn.execute("SELECT * FROM project_checklist_items WHERE id=?", (item_id,)).fetchone()
     return row_to_dict(row)
+
+
+@app.post("/api/projects/{project_id}/stages/{stage_key}/checklists/reorder")
+def reorder_project_stage_checklists(
+    project_id: int,
+    stage_key: str,
+    payload: ProjectChecklistReorderRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, bool]:
+    with get_db() as conn:
+        return _reorder_project_stage_checklists_impl(conn, project_id, stage_key, payload, current_user)
+
+
+@app.post("/api/projects/{project_id}/stage-checklists/{stage_key}/reorder")
+def reorder_project_stage_checklists_alias(
+    project_id: int,
+    stage_key: str,
+    payload: ProjectChecklistReorderRequest,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, bool]:
+    with get_db() as conn:
+        return _reorder_project_stage_checklists_impl(conn, project_id, stage_key, payload, current_user)
 
 
 @app.delete("/api/checklists/{item_id}")

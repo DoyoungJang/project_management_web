@@ -800,7 +800,7 @@ function getTimelineMetrics(dayCount) {
   const rowGap = 14;
   const trackWidth = Math.max(220, surfaceWidth - surfacePadding - labelWidth - rowGap);
   const minCellWidth = dayCount > 365 ? 0.55 : dayCount > 180 ? 0.8 : 1.2;
-  const cellWidth = clampNumber(trackWidth / Math.max(dayCount, 1), minCellWidth, 42);
+  const cellWidth = Math.max(trackWidth / Math.max(dayCount, 1), minCellWidth);
   const approxLabelWidth = 72;
   const maxLabels = Math.max(4, Math.floor(trackWidth / approxLabelWidth));
   const labelStep = Math.max(1, Math.ceil(dayCount / maxLabels));
@@ -1108,6 +1108,38 @@ function renderTimelineDayCell(day, index, days, config) {
   `;
 }
 
+function buildScheduledItemLanes(items) {
+  const lanes = [];
+
+  items.forEach((item) => {
+    const visibleStart = item.visibleRange?.start || item.ganttRange.start;
+    const visibleEnd = item.visibleRange?.end || item.ganttRange.end;
+    const startTime = visibleStart.getTime();
+    const endTime = visibleEnd.getTime();
+    let targetLane = null;
+
+    for (const lane of lanes) {
+      if (startTime > lane.lastEndTime) {
+        targetLane = lane;
+        break;
+      }
+    }
+
+    if (!targetLane) {
+      targetLane = {
+        items: [],
+        lastEndTime: Number.NEGATIVE_INFINITY,
+      };
+      lanes.push(targetLane);
+    }
+
+    targetLane.items.push(item);
+    targetLane.lastEndTime = endTime;
+  });
+
+  return lanes;
+}
+
 function renderScheduledRows({ scheduledItems, dayIndexMap, todayIndex, dueIndex, styleVars, labelWidth, headerMode, trackBandsHtml }) {
   if (!scheduledItems.length) {
     return `
@@ -1127,47 +1159,132 @@ function renderScheduledRows({ scheduledItems, dayIndexMap, todayIndex, dueIndex
     `;
   }
 
-  return scheduledItems
-    .map((item) => {
-      const range = item.ganttRange;
-      const visibleStart = item.visibleRange?.start || range.start;
-      const visibleEnd = item.visibleRange?.end || range.end;
-      const startIndex = dayIndexMap.get(toDateKey(visibleStart));
-      const endIndex = dayIndexMap.get(toDateKey(visibleEnd));
-      const stageName = stageLabel(item.stage);
-      const color = stageColor(item.stage);
-      const span = Math.max(1, endIndex - startIndex + 1);
-      const durationLabel = `${getInclusiveDaySpan(range.start, range.end)}d`;
+  const packedItems = [...scheduledItems].sort((a, b) => {
+    const startA = a.visibleRange?.start || a.ganttRange.start;
+    const startB = b.visibleRange?.start || b.ganttRange.start;
+    const endA = a.visibleRange?.end || a.ganttRange.end;
+    const endB = b.visibleRange?.end || b.ganttRange.end;
+    return (
+      startA - startB ||
+      endA - endB ||
+      a.ganttRange.start - b.ganttRange.start ||
+      String(a.content || "").localeCompare(String(b.content || ""), "ko", { sensitivity: "base" })
+    );
+  });
+  const lanes = buildScheduledItemLanes(packedItems);
+
+  return lanes
+    .map((lane, laneIndex) => {
+      if (lane.items.length === 1) {
+        const item = lane.items[0];
+        const range = item.ganttRange;
+        const visibleStart = item.visibleRange?.start || range.start;
+        const visibleEnd = item.visibleRange?.end || range.end;
+        const startIndex = dayIndexMap.get(toDateKey(visibleStart));
+        const endIndex = dayIndexMap.get(toDateKey(visibleEnd));
+        const stageName = stageLabel(item.stage);
+        const color = stageColor(item.stage);
+        const span = Math.max(1, endIndex - startIndex + 1);
+        const durationLabel = `${getInclusiveDaySpan(range.start, range.end)}d`;
+        return `
+          <div class="gantt-row gantt-row--task" style="grid-template-columns:${labelWidth}px auto;">
+            <div class="gantt-label gantt-label--card">
+              <div class="gantt-label__top">
+                <span class="gantt-stage-pill" style="background:${color}18; color:${color}; border-color:${color}33;">
+                  ${escapeHtml(stageName)}
+                </span>
+                <span class="gantt-duration-pill">${durationLabel}</span>
+              </div>
+              <strong class="gantt-task-title">${escapeHtml(item.content)}</strong>
+              <div class="gantt-date-pills">
+                <span class="gantt-date-pill">시작 ${escapeHtml(range.startLabel)}</span>
+                <span class="gantt-date-pill">목표 ${escapeHtml(range.targetLabel)}</span>
+              </div>
+            </div>
+            <div class="gantt-track-shell">
+              <div class="gantt-track ${headerMode !== "day" ? "gantt-track--overview" : ""}" style="${styleVars}">
+                ${headerMode !== "day" ? trackBandsHtml : ""}
+                ${buildMarkerHtml(todayIndex, dueIndex)}
+                <button
+                  type="button"
+                  class="gantt-bar"
+                  data-open-gantt-description="${item.id}"
+                  style="left:calc(${startIndex} * var(--gantt-cell-width)); width:calc(${span} * var(--gantt-cell-width) - 8px); background:${color};"
+                  title="${escapeHtml(item.content)}"
+                  aria-label="${escapeHtml(item.content)} 설명 보기"
+                >
+                  <span class="gantt-bar__title">${escapeHtml(item.content)}</span>
+                  ${span >= 4 ? `<span class="gantt-bar__duration">${durationLabel}</span>` : ""}
+                </button>
+                <span class="gantt-cursor-line hidden" aria-hidden="true"></span>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      const laneBarsHtml = lane.items
+        .map((item) => {
+          const range = item.ganttRange;
+          const visibleStart = item.visibleRange?.start || range.start;
+          const visibleEnd = item.visibleRange?.end || range.end;
+          const startIndex = dayIndexMap.get(toDateKey(visibleStart));
+          const endIndex = dayIndexMap.get(toDateKey(visibleEnd));
+          const color = stageColor(item.stage);
+          const span = Math.max(1, endIndex - startIndex + 1);
+          const durationLabel = `${getInclusiveDaySpan(range.start, range.end)}d`;
+
+          return `
+            <button
+              type="button"
+              class="gantt-bar"
+              data-open-gantt-description="${item.id}"
+              style="left:calc(${startIndex} * var(--gantt-cell-width)); width:calc(${span} * var(--gantt-cell-width) - 8px); background:${color};"
+              title="${escapeHtml(item.content)}"
+              aria-label="${escapeHtml(item.content)} 설명 보기"
+            >
+              <span class="gantt-bar__title">${escapeHtml(item.content)}</span>
+              ${span >= 4 ? `<span class="gantt-bar__duration">${durationLabel}</span>` : ""}
+            </button>
+          `;
+        })
+        .join("");
+
+      const laneItemsHtml = lane.items
+        .map((item) => {
+          const color = stageColor(item.stage);
+          const range = item.ganttRange;
+          return `
+            <button
+              type="button"
+              class="gantt-lane-chip"
+              data-open-gantt-description="${item.id}"
+              style="--lane-chip-bg:${color}18; --lane-chip-border:${color}33; --lane-chip-fg:${color};"
+              title="${escapeHtml(item.content)} | ${escapeHtml(range.startLabel)} ~ ${escapeHtml(range.targetLabel)}"
+              aria-label="${escapeHtml(item.content)} 설명 보기"
+            >
+              ${escapeHtml(item.content)}
+            </button>
+          `;
+        })
+        .join("");
+
       return `
         <div class="gantt-row gantt-row--task" style="grid-template-columns:${labelWidth}px auto;">
-          <div class="gantt-label gantt-label--card">
+          <div class="gantt-label gantt-label--card gantt-lane-card">
             <div class="gantt-label__top">
-              <span class="gantt-stage-pill" style="background:${color}18; color:${color}; border-color:${color}33;">
-                ${escapeHtml(stageName)}
-              </span>
-              <span class="gantt-duration-pill">${durationLabel}</span>
+              <span class="gantt-duration-pill">겹침 레인 ${laneIndex + 1}</span>
+              <span class="gantt-duration-pill">${lane.items.length}개 작업</span>
             </div>
-            <strong class="gantt-task-title">${escapeHtml(item.content)}</strong>
-            <div class="gantt-date-pills">
-              <span class="gantt-date-pill">시작 ${escapeHtml(range.startLabel)}</span>
-              <span class="gantt-date-pill">목표 ${escapeHtml(range.targetLabel)}</span>
+            <div class="gantt-lane-chip-list">
+              ${laneItemsHtml}
             </div>
           </div>
           <div class="gantt-track-shell">
             <div class="gantt-track ${headerMode !== "day" ? "gantt-track--overview" : ""}" style="${styleVars}">
               ${headerMode !== "day" ? trackBandsHtml : ""}
               ${buildMarkerHtml(todayIndex, dueIndex)}
-              <button
-                type="button"
-                class="gantt-bar"
-                data-open-gantt-description="${item.id}"
-                style="left:calc(${startIndex} * var(--gantt-cell-width)); width:calc(${span} * var(--gantt-cell-width) - 8px); background:${color};"
-                title="${escapeHtml(item.content)}"
-                aria-label="${escapeHtml(item.content)} 설명 보기"
-              >
-                <span class="gantt-bar__title">${escapeHtml(item.content)}</span>
-                ${span >= 4 ? `<span class="gantt-bar__duration">${durationLabel}</span>` : ""}
-              </button>
+              ${laneBarsHtml}
               <span class="gantt-cursor-line hidden" aria-hidden="true"></span>
             </div>
           </div>
@@ -1223,6 +1340,9 @@ function renderGanttChart() {
       },
     }));
 
+  els.empty.classList.add("hidden");
+  els.scroll.classList.remove("hidden");
+
   const days = buildTimelineDays(appliedRange.start, appliedRange.end);
   const dayIndexMap = new Map(days.map((day, idx) => [toDateKey(day), idx]));
   const todayIndex = today ? dayIndexMap.get(toDateKey(today)) : null;
@@ -1239,8 +1359,6 @@ function renderGanttChart() {
   };
 
   els.rangeLabel.textContent = formatRange(appliedRange.start, appliedRange.end);
-  els.empty.classList.add("hidden");
-  els.scroll.classList.remove("hidden");
 
   const headerHtml = `
     <div class="gantt-row gantt-row--header" style="grid-template-columns:${metrics.labelWidth}px auto;">
