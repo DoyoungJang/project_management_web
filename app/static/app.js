@@ -85,6 +85,7 @@ function relationLabel(raw) {
   const map = {
     owner: "Owner",
     participant: "참가자",
+    viewer: "Viewer",
     admin: "관리자",
   };
   return map[raw] || "기타";
@@ -93,6 +94,7 @@ function relationLabel(raw) {
 function relationBadgeClass(raw) {
   if (raw === "owner") return "badge--owner";
   if (raw === "participant") return "badge--participant";
+  if (raw === "viewer") return "badge--viewer";
   return "";
 }
 
@@ -738,6 +740,7 @@ function renderProjects() {
         <div class="actions">
           <button data-open-project="${p.id}">작업 보드</button>
           <button data-open-project-gantt="${p.id}">간트 차트</button>
+          <button data-open-project-calendar="${p.id}">캘린더</button>
           <button class="btn-settings" data-open-project-settings="${p.id}">프로젝트 설정</button>
           ${canDelete ? `<button class="danger" data-del-project="${p.id}">삭제</button>` : ""}
         </div>
@@ -1502,6 +1505,13 @@ els.projectList?.addEventListener("click", async (e) => {
     return;
   }
 
+  const calendarBtn = e.target.closest("[data-open-project-calendar]");
+  if (calendarBtn) {
+    const id = calendarBtn.getAttribute("data-open-project-calendar");
+    window.location.href = `/static/project_calendar.html?project_id=${id}`;
+    return;
+  }
+
   const delBtn = e.target.closest("[data-del-project]");
   if (!delBtn) return;
 
@@ -1622,7 +1632,12 @@ els.todayNotifications?.addEventListener("click", (e) => {
       startDate: item.start_date || "",
       targetDate: item.target_date || "",
       workflowStatus: item.workflow_status || "upcoming",
-      editable: Boolean(currentUser?.is_admin || item.membership_type === "owner" || item.membership_type === "admin"),
+      editable: Boolean(
+        currentUser?.is_admin ||
+          item.membership_type === "owner" ||
+          item.membership_type === "participant" ||
+          item.membership_type === "admin"
+      ),
       onSave: async (payload) => {
         const saved = await api.patch(`/api/checklists/${checklistId}`, {
           content: payload.content,

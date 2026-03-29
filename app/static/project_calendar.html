@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>프로젝트 캘린더</title>
+    <link rel="stylesheet" href="/static/styles.css?v=20260329_8" />
+  </head>
+  <body class="page-gantt page-calendar">
+    <header class="hero hero--gantt">
+      <div class="hero__inner hero__inner--gantt">
+        <div class="gantt-hero__orb gantt-hero__orb--one" aria-hidden="true"></div>
+        <div class="gantt-hero__orb gantt-hero__orb--two" aria-hidden="true"></div>
+        <div class="topbar">
+          <div class="actions">
+            <a class="btn-link" href="/">프로젝트 목록</a>
+            <a id="project-board-link" class="btn-link" href="#">작업 보드</a>
+            <a id="project-gantt-link" class="btn-link" href="#">간트 차트</a>
+            <a id="project-settings-link" class="btn-link" href="#">작업 추가/관리</a>
+          </div>
+          <div class="actions">
+            <a class="btn-link" href="/static/settings.html">내 설정</a>
+            <a id="admin-link" class="btn-link hidden" href="/static/admin.html">Admin</a>
+            <button id="logout-btn" type="button">로그아웃</button>
+          </div>
+        </div>
+        <div class="gantt-hero__copy">
+          <div class="gantt-hero__eyebrow">Calendar Workspace</div>
+          <h1 id="project-title">프로젝트 캘린더</h1>
+          <p id="project-subtitle">작업 일정을 월간 캘린더 형태로 확인합니다.</p>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout layout--gantt">
+      <section class="cards cards--gantt">
+        <article class="card card--gantt-stat">
+          <h3>프로젝트 마감일</h3>
+          <p id="calendar-project-due">-</p>
+        </article>
+        <article class="card card--gantt-stat">
+          <h3>현재 월</h3>
+          <p id="calendar-current-month">-</p>
+        </article>
+        <article class="card card--gantt-stat">
+          <h3>이번 달 일정</h3>
+          <p id="calendar-visible-count">0</p>
+        </article>
+        <article class="card card--gantt-stat">
+          <h3>일정 미설정 작업</h3>
+          <p id="calendar-unscheduled-count">0</p>
+        </article>
+      </section>
+
+      <section class="panel gantt-panel">
+        <div class="panel__header gantt-panel__header calendar-panel__header">
+          <div>
+            <h2>월간 작업 캘린더</h2>
+            <p class="item__meta">시작일과 목표일을 기준으로 월간 캘린더에 작업을 배치해 한눈에 확인합니다.</p>
+          </div>
+          <div class="calendar-month-nav">
+            <button id="calendar-prev-month" type="button">이전 달</button>
+            <label class="calendar-month-picker">
+              <span class="item__meta">기준 월</span>
+              <input id="calendar-month-input" type="month" />
+            </label>
+            <button id="calendar-today-btn" type="button">이번 달</button>
+            <button id="calendar-next-month" type="button">다음 달</button>
+          </div>
+        </div>
+
+        <div id="calendar-legend" class="actions gantt-legend"></div>
+
+        <div class="calendar-toolbar">
+          <section class="gantt-filter-panel calendar-filter-panel">
+            <div class="gantt-filter-panel__header">
+              <div>
+                <div class="gantt-filter-panel__eyebrow">작업 필터</div>
+                <strong>캘린더에 표시할 작업 선택</strong>
+              </div>
+              <div class="gantt-filter-panel__controls">
+                <label class="gantt-filter-panel__sort">
+                  <span class="gantt-filter-panel__sort-label">정렬</span>
+                  <select id="calendar-sort-select">
+                    <option value="timeline">일정순</option>
+                    <option value="manual">기본 순서</option>
+                    <option value="start_date">시작일 빠른순</option>
+                    <option value="target_date">목표일 빠른순</option>
+                    <option value="title">작업명순</option>
+                  </select>
+                </label>
+                <div class="gantt-filter-panel__buttons">
+                  <button id="calendar-filter-select-all" class="gantt-filter-panel__action" type="button">전체 선택</button>
+                  <button id="calendar-filter-clear-all" class="gantt-filter-panel__action" type="button">전체 해제</button>
+                </div>
+              </div>
+            </div>
+            <div id="calendar-filter-summary" class="item__meta gantt-filter-panel__summary">전체 작업 표시 중</div>
+            <div id="calendar-filter-list" class="gantt-filter-list"></div>
+          </section>
+        </div>
+
+        <div id="calendar-empty" class="item gantt-empty hidden">이번 달에 표시할 작업이 없습니다.</div>
+        <div id="calendar-scroll" class="calendar-scroll">
+          <div id="calendar-board" class="calendar-board">
+            <div id="calendar-weekdays" class="calendar-weekdays"></div>
+            <div id="calendar-grid" class="calendar-grid"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel gantt-panel gantt-panel--secondary">
+        <div class="panel__header">
+          <div>
+            <h2>일정 미설정 작업</h2>
+            <p class="item__meta">시작일과 목표일이 모두 없는 작업은 아래에서 따로 확인합니다.</p>
+          </div>
+        </div>
+        <div id="calendar-unscheduled-list" class="list"></div>
+      </section>
+    </main>
+
+    <script src="/static/common.js?v=20260329_2"></script>
+    <script src="/static/project_calendar.js?v=20260329_8"></script>
+  </body>
+</html>

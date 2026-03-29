@@ -400,6 +400,7 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
+                role TEXT NOT NULL DEFAULT 'editor',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (project_id, user_id),
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -460,6 +461,7 @@ def init_db() -> None:
         ensure_column(conn, "project_checklist_items", "workflow_status", "TEXT NOT NULL DEFAULT 'upcoming'")
         ensure_column(conn, "project_checklist_items", "description", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "checklist_template_items", "description", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "project_participants", "role", "TEXT NOT NULL DEFAULT 'editor'")
 
         checklist_table_sql_row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='project_checklist_items'"
@@ -626,6 +628,13 @@ def init_db() -> None:
             SELECT p.id, u.id
             FROM projects p
             JOIN users u ON u.username = p.owner
+            """
+        )
+        conn.execute(
+            """
+            UPDATE project_participants
+            SET role = 'editor'
+            WHERE role IS NULL OR trim(role) = ''
             """
         )
         project_rows = conn.execute("SELECT id FROM projects").fetchall()
@@ -913,11 +922,16 @@ def ensure_project_owner_in_participants(
     owner_user_id = ensure_username_exists(conn, owner_username)
     conn.execute(
         """
-        INSERT OR IGNORE INTO project_participants (project_id, user_id)
-        VALUES (?, ?)
+        INSERT OR IGNORE INTO project_participants (project_id, user_id, role)
+        VALUES (?, ?, 'editor')
         """,
         (project_id, owner_user_id),
     )
+
+
+def normalize_participant_role(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    return "viewer" if normalized == "viewer" else "editor"
 
 
 def is_project_participant(conn: sqlite3.Connection, project_id: int, username: str) -> bool:
@@ -932,6 +946,60 @@ def is_project_participant(conn: sqlite3.Connection, project_id: int, username: 
         (project_id, username),
     ).fetchone()
     return bool(row)
+
+
+def get_project_participant_role(conn: sqlite3.Connection, project_id: int, username: str) -> str | None:
+    row = conn.execute(
+        """
+        SELECT pp.role
+        FROM project_participants pp
+        JOIN users u ON u.id = pp.user_id
+        WHERE pp.project_id=? AND u.username=?
+        LIMIT 1
+        """,
+        (project_id, username),
+    ).fetchone()
+    if not row:
+        return None
+    return normalize_participant_role(row["role"])
+
+
+def get_project_membership_type(
+    conn: sqlite3.Connection, project_row: sqlite3.Row, current_user: dict[str, Any]
+) -> str | None:
+    project_id = int(project_row["project_id"]) if "project_id" in project_row.keys() else int(project_row["id"])
+    if current_user["is_admin"]:
+        return "admin"
+    if project_row["owner"] == current_user["username"]:
+        return "owner"
+    participant_role = get_project_participant_role(conn, project_id, current_user["username"])
+    if participant_role == "viewer":
+        return "viewer"
+    if participant_role == "editor":
+        return "participant"
+    return None
+
+
+def can_manage_project(conn: sqlite3.Connection, project_row: sqlite3.Row, current_user: dict[str, Any]) -> bool:
+    return get_project_membership_type(conn, project_row, current_user) in {"admin", "owner"}
+
+
+def can_edit_project_tasks(conn: sqlite3.Connection, project_row: sqlite3.Row, current_user: dict[str, Any]) -> bool:
+    return get_project_membership_type(conn, project_row, current_user) in {"admin", "owner", "participant"}
+
+
+def with_project_permissions(
+    conn: sqlite3.Connection, project_row: sqlite3.Row, current_user: dict[str, Any]
+) -> dict[str, Any]:
+    data = row_to_dict(project_row)
+    membership_type = get_project_membership_type(conn, project_row, current_user)
+    data["membership_type"] = membership_type or "viewer"
+    data["can_manage_project"] = membership_type in {"admin", "owner"}
+    data["can_manage_participants"] = membership_type in {"admin", "owner"}
+    data["can_manage_stages"] = membership_type in {"admin", "owner"}
+    data["can_apply_templates"] = membership_type in {"admin", "owner"}
+    data["can_edit_tasks"] = membership_type in {"admin", "owner", "participant"}
+    return data
 
 
 def require_project_owner(
@@ -951,14 +1019,19 @@ def require_project_access(
     row = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Project not found.")
-    if current_user["is_admin"]:
-        return row
-    if row["owner"] == current_user["username"]:
-        return row
-    if is_project_participant(conn, project_id, current_user["username"]):
+    if get_project_membership_type(conn, row, current_user):
         return row
     raise HTTPException(status_code=403, detail="No permission to access this project.")
     return row
+
+
+def require_project_task_edit_access(
+    conn: sqlite3.Connection, project_id: int, current_user: dict[str, Any]
+) -> sqlite3.Row:
+    row = require_project_access(conn, project_id, current_user)
+    if can_edit_project_tasks(conn, row, current_user):
+        return row
+    raise HTTPException(status_code=403, detail="No permission to edit tasks in this project.")
 
 
 def require_template_edit_access(
@@ -1080,6 +1153,12 @@ class NotificationRuleCreate(BaseModel):
 class ParticipantCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=2, max_length=40, pattern=r"^[a-zA-Z0-9._-]+$")
+    role: str = Field(default="editor", pattern="^(editor|viewer)$")
+
+
+class ParticipantUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: str = Field(pattern="^(editor|viewer)$")
 
 
 class ProjectStageCreate(BaseModel):
@@ -1136,7 +1215,7 @@ def _reorder_project_stage_checklists_impl(
     payload: ProjectChecklistReorderRequest,
     current_user: dict[str, Any],
 ) -> dict[str, bool]:
-    require_project_owner(conn, project_id, current_user)
+    require_project_task_edit_access(conn, project_id, current_user)
     ensure_project_stage_exists(conn, project_id, stage_key)
     rows = conn.execute(
         """
@@ -1750,7 +1829,7 @@ def list_projects(current_user: dict[str, Any] = Depends(get_current_user)) -> l
 def get_project(project_id: int, current_user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     with get_db() as conn:
         row = require_project_access(conn, project_id, current_user)
-    return row_to_dict(row)
+        return with_project_permissions(conn, row, current_user)
 
 
 @app.get("/api/projects/{project_id}/stages")
@@ -1928,7 +2007,7 @@ def list_project_participants(
         conn.commit()
         rows = conn.execute(
             """
-            SELECT u.id, u.username, u.display_name, pp.created_at
+            SELECT u.id, u.username, u.display_name, pp.role, pp.created_at
             FROM project_participants pp
             JOIN users u ON u.id = pp.user_id
             WHERE pp.project_id=?
@@ -1939,6 +2018,7 @@ def list_project_participants(
     result = [row_to_dict(row) for row in rows]
     for item in result:
         item["project_owner"] = project["owner"]
+        item["role"] = normalize_participant_role(item.get("role"))
     return result
 
 
@@ -1949,6 +2029,7 @@ def add_project_participant(
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:
     username = payload.username.strip()
+    role = normalize_participant_role(payload.role)
     with get_db() as conn:
         project = require_project_owner(conn, project_id, current_user)
         if username == project["owner"]:
@@ -1961,17 +2042,17 @@ def add_project_participant(
         if exists:
             raise HTTPException(status_code=400, detail="This participant is already added.")
         conn.execute(
-            "INSERT INTO project_participants (project_id, user_id) VALUES (?, ?)",
-            (project_id, user_id),
+            "INSERT INTO project_participants (project_id, user_id, role) VALUES (?, ?, ?)",
+            (project_id, user_id, role),
         )
         conn.commit()
         row = conn.execute(
             """
-            SELECT u.id, u.username, u.display_name
+            SELECT u.id, u.username, u.display_name, ? AS role
             FROM users u
             WHERE u.id=?
             """,
-            (user_id,),
+            (role, user_id),
         ).fetchone()
     return row_to_dict(row)
 
@@ -1998,6 +2079,40 @@ def delete_project_participant(
             raise HTTPException(status_code=404, detail="Participant not found.")
         conn.commit()
     return {"ok": True}
+
+
+@app.patch("/api/projects/{project_id}/participants/{username}")
+def update_project_participant(
+    project_id: int,
+    username: str,
+    payload: ParticipantUpdate,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    role = normalize_participant_role(payload.role)
+    with get_db() as conn:
+        project = require_project_owner(conn, project_id, current_user)
+        target_username = username.strip()
+        if target_username == project["owner"]:
+            raise HTTPException(status_code=400, detail="Owner role cannot be changed.")
+        user_id = get_user_id_by_username(conn, target_username)
+        if user_id is None:
+            raise HTTPException(status_code=404, detail="Participant not found.")
+        cur = conn.execute(
+            "UPDATE project_participants SET role=? WHERE project_id=? AND user_id=?",
+            (role, project_id, user_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Participant not found.")
+        conn.commit()
+        row = conn.execute(
+            """
+            SELECT u.id, u.username, u.display_name, ? AS role
+            FROM users u
+            WHERE u.id=?
+            """,
+            (role, user_id),
+        ).fetchone()
+    return row_to_dict(row)
 
 
 @app.post("/api/projects", status_code=201)
@@ -2128,7 +2243,7 @@ def create_checklist_item(
     project_id: int, payload: ChecklistItemCreate, current_user: dict[str, Any] = Depends(get_current_user)
 ) -> dict[str, Any]:
     with get_db() as conn:
-        require_project_access(conn, project_id, current_user)
+        require_project_task_edit_access(conn, project_id, current_user)
         ensure_project_stage_exists(conn, project_id, payload.stage)
         next_pos_row = conn.execute(
             """
@@ -2182,7 +2297,7 @@ def update_checklist_item(
         ).fetchone()
         if not current:
             raise HTTPException(status_code=404, detail="Checklist item not found.")
-        if not current_user["is_admin"] and current["owner"] != current_user["username"]:
+        if not can_edit_project_tasks(conn, current, current_user):
             raise HTTPException(status_code=403, detail="No permission to edit this checklist item.")
 
         if "content" in updates:
@@ -2257,6 +2372,7 @@ def delete_checklist_item(
         current = conn.execute(
             """
             SELECT c.id, p.owner
+                   , p.id AS project_id
             FROM project_checklist_items c
             JOIN projects p ON p.id = c.project_id
             WHERE c.id=?
@@ -2265,7 +2381,7 @@ def delete_checklist_item(
         ).fetchone()
         if not current:
             raise HTTPException(status_code=404, detail="Checklist item not found.")
-        if not current_user["is_admin"] and current["owner"] != current_user["username"]:
+        if not can_edit_project_tasks(conn, current, current_user):
             raise HTTPException(status_code=403, detail="No permission to delete this checklist item.")
         cur = conn.execute("DELETE FROM project_checklist_items WHERE id=?", (item_id,))
         if cur.rowcount == 0:
@@ -2477,7 +2593,18 @@ def my_upcoming_checklists(
                     c.target_date,
                     c.workflow_status,
                     CAST(julianday(date(c.target_date)) - julianday(date('now','localtime')) AS INTEGER) AS days_left,
-                    CASE WHEN p.owner=? THEN 'owner' ELSE 'participant' END AS membership_type
+                    CASE
+                        WHEN p.owner=? THEN 'owner'
+                        WHEN EXISTS (
+                            SELECT 1
+                            FROM project_participants pp
+                            JOIN users u ON u.id = pp.user_id
+                            WHERE pp.project_id = p.id
+                              AND u.username=?
+                              AND COALESCE(pp.role, 'editor') = 'viewer'
+                        ) THEN 'viewer'
+                        ELSE 'participant'
+                    END AS membership_type
                 FROM project_checklist_items c
                 JOIN projects p ON p.id = c.project_id
                 WHERE c.is_done=0
@@ -2495,7 +2622,13 @@ def my_upcoming_checklists(
                   AND date(c.target_date) BETWEEN date('now','localtime') AND date('now','localtime', '+' || ? || ' day')
                 ORDER BY date(c.target_date) ASC, p.name ASC, c.stage ASC, c.position ASC
                 """,
-                (current_user["username"], current_user["username"], current_user["username"], days),
+                (
+                    current_user["username"],
+                    current_user["username"],
+                    current_user["username"],
+                    current_user["username"],
+                    days,
+                ),
             ).fetchall()
     return [row_to_dict(row) for row in rows]
 

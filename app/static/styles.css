@@ -29,7 +29,7 @@ body {
 }
 
 .hero__inner {
-  max-width: 1200px;
+  max-width: 1560px;
   margin: 0 auto;
 }
 
@@ -44,7 +44,7 @@ body {
 }
 
 .layout {
-  max-width: 1200px;
+  max-width: 1560px;
   margin: 24px auto;
   padding: 0 16px 28px;
   display: grid;
@@ -181,6 +181,11 @@ button:active {
   color: #173e7a;
 }
 
+.badge.badge--viewer {
+  background: #edf2f7;
+  color: #445468;
+}
+
 .segmented {
   display: inline-flex;
   gap: 6px;
@@ -232,6 +237,10 @@ button:active {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
+}
+
+.inline-row--triple {
+  grid-template-columns: minmax(0, 1fr) 150px auto;
 }
 
 .settings-grid {
@@ -508,6 +517,24 @@ button:active {
   gap: 12px;
 }
 
+.task-return-banner {
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: #f7fbff;
+}
+
+.task-return-banner > div {
+  display: grid;
+  gap: 4px;
+}
+
+.task-return-banner strong {
+  display: block;
+}
+
 .work-layout {
   display: grid;
   grid-template-columns: minmax(260px, 360px) 1fr;
@@ -566,6 +593,10 @@ button:active {
     border-color 0.18s ease,
     box-shadow 0.18s ease,
     transform 0.18s ease;
+}
+
+.stage-manager-item--readonly {
+  cursor: default;
 }
 
 .stage-manager-title {
@@ -637,6 +668,10 @@ button:active {
   border-radius: 10px;
   padding: 9px 10px;
   cursor: grab;
+}
+
+.kanban-card--readonly {
+  cursor: default;
 }
 
 .kanban-card.dragging {
@@ -775,6 +810,18 @@ button:active {
   grid-template-columns: auto 1fr auto;
   align-items: start;
   cursor: grab;
+}
+
+.project-item-card--readonly {
+  cursor: default;
+}
+
+.participant-role-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .project-item-card--done {
@@ -1375,7 +1422,7 @@ button:active {
 .gantt-hero__copy {
   position: relative;
   z-index: 1;
-  max-width: 760px;
+  max-width: 1080px;
 }
 
 .gantt-hero__eyebrow {
@@ -2197,6 +2244,291 @@ button:active {
   overflow-wrap: anywhere;
 }
 
+.calendar-panel__header {
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.calendar-toolbar {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.calendar-filter-panel {
+  margin-top: 0;
+}
+
+.calendar-month-nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.calendar-month-nav button {
+  background: #f4f7fb;
+  color: #244363;
+  border: 1px solid #d6e0ec;
+}
+
+.calendar-month-nav button:hover {
+  background: #edf3fa;
+}
+
+.calendar-month-picker {
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+}
+
+.calendar-month-picker input {
+  min-width: 0;
+}
+
+.calendar-scroll {
+  margin-top: 16px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.calendar-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+
+.calendar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(58, 96, 128, 0.25);
+  border-radius: 999px;
+}
+
+.calendar-board {
+  min-width: 980px;
+}
+
+.calendar-weekdays,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.calendar-weekdays {
+  border: 1px solid #dde6f1;
+  border-bottom: none;
+  border-radius: 18px 18px 0 0;
+  overflow: hidden;
+  background: #f4f8fd;
+}
+
+.calendar-weekday {
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #48617b;
+  text-align: right;
+  border-right: 1px solid #e2eaf4;
+}
+
+.calendar-weekday:last-child {
+  border-right: none;
+}
+
+.calendar-weekday.is-sunday {
+  color: #b44735;
+}
+
+.calendar-weekday.is-saturday {
+  color: #315d94;
+}
+
+.calendar-grid {
+  border: 1px solid #dde6f1;
+  border-radius: 0 0 18px 18px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.calendar-grid {
+  gap: 0;
+}
+
+.calendar-day {
+  min-height: 182px;
+  padding: 10px;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  border-right: 1px solid #e7edf6;
+  border-top: 1px solid #e7edf6;
+  background: linear-gradient(180deg, #fff, #fbfdff);
+}
+
+.calendar-day:nth-child(-n + 7) {
+  border-top: none;
+}
+
+.calendar-day:nth-child(7n) {
+  border-right: none;
+}
+
+.calendar-day.is-outside-month {
+  background: #f8fbff;
+}
+
+.calendar-day.is-today {
+  background: linear-gradient(180deg, #f3fbfa, #ffffff);
+  box-shadow: inset 0 0 0 1px rgba(15, 109, 102, 0.16);
+}
+
+.calendar-day.is-due {
+  box-shadow: inset 0 0 0 1px rgba(192, 54, 44, 0.18);
+}
+
+.calendar-day__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.calendar-day__date {
+  font-size: 1rem;
+  line-height: 1;
+  color: #193247;
+}
+
+.calendar-day.is-outside-month .calendar-day__date {
+  color: #92a1b0;
+}
+
+.calendar-day__badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.calendar-day__badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: #eef3ff;
+  color: #28456e;
+}
+
+.calendar-day__badge.is-today {
+  background: rgba(15, 109, 102, 0.12);
+  color: #0f6d66;
+}
+
+.calendar-day__badge.is-due {
+  background: rgba(192, 54, 44, 0.12);
+  color: #a12b23;
+}
+
+.calendar-day__tasks {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  max-height: 132px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.calendar-day__tasks::-webkit-scrollbar {
+  width: 8px;
+}
+
+.calendar-day__tasks::-webkit-scrollbar-thumb {
+  background: rgba(58, 96, 128, 0.18);
+  border-radius: 999px;
+}
+
+.calendar-day__empty {
+  font-size: 0.82rem;
+  color: #90a0af;
+  line-height: 1.35;
+}
+
+.calendar-task-chip {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 7px 8px;
+  box-shadow: 0 8px 14px rgba(24, 45, 68, 0.04);
+}
+
+.calendar-task-chip:hover {
+  opacity: 1;
+  filter: brightness(0.99);
+}
+
+.calendar-task-chip:active {
+  transform: none;
+}
+
+.calendar-task-chip__title {
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-task-chip__meta {
+  font-size: 0.71rem;
+  font-weight: 700;
+  opacity: 0.82;
+}
+
+.calendar-unscheduled-card {
+  padding: 14px 16px;
+  gap: 12px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fff, #f8fbff);
+  box-shadow: 0 12px 24px rgba(20, 38, 58, 0.05);
+}
+
+.calendar-unscheduled-card__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.calendar-unscheduled-card__copy {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.calendar-unscheduled-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.calendar-unscheduled-card__title {
+  font-size: 1rem;
+}
+
+.calendar-unscheduled-card__body,
+.calendar-unscheduled-empty {
+  color: #566b80;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .text-edit,
 .date-edit {
   display: grid;
@@ -2389,6 +2721,11 @@ details.item[open] > .admin-user-summary {
     align-items: flex-start;
   }
 
+  .task-return-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .task-desc-dialog {
     width: calc(100vw - 20px);
   }
@@ -2484,6 +2821,33 @@ details.item[open] > .admin-user-summary {
     align-items: flex-start;
   }
 
+  .calendar-month-nav {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .calendar-month-picker {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .calendar-board {
+    min-width: 840px;
+  }
+
+  .calendar-day {
+    min-height: 164px;
+  }
+
+  .calendar-day__tasks {
+    max-height: 118px;
+  }
+
+  .calendar-unscheduled-card__top {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .segmented {
     width: 100%;
     justify-content: flex-start;
@@ -2492,6 +2856,10 @@ details.item[open] > .admin-user-summary {
 
   .kanban-board {
     grid-template-columns: repeat(4, minmax(220px, 1fr));
+  }
+
+  .inline-row--triple {
+    grid-template-columns: 1fr;
   }
 
   .work-layout {

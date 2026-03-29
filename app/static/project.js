@@ -38,24 +38,77 @@ const els = {
   applyTemplateBtn: document.getElementById("apply-template-btn"),
   participantForm: document.getElementById("participant-form"),
   participantUsername: document.getElementById("participant-username"),
+  participantRole: document.getElementById("participant-role"),
   participantList: document.getElementById("participant-list"),
+  taskReturnBanner: document.getElementById("task-return-banner"),
+  taskReturnTitle: document.getElementById("task-return-title"),
+  taskReturnDescription: document.getElementById("task-return-description"),
+  taskReturnLink: document.getElementById("task-return-link"),
 };
 
 let checklistItems = [];
 let templates = [];
 let participants = [];
 let projectStages = [];
+let currentProject = null;
 let draggingChecklistId = null;
 let currentUser = null;
-let editingChecklistId = null;
 let draggingStageManagerId = null;
 let draggingStageChecklistId = null;
 let draggingStageChecklistStageKey = null;
 let currentTaskSort = normalizeTaskSortKey(params.get("task_sort"));
+let canManageProject = false;
+let canManageParticipants = false;
+let canManageStages = false;
+let canApplyTemplates = false;
+let canEditTasks = false;
+const requestedEditChecklistId = Number(params.get("edit_checklist_id") || "0");
+const requestedTaskAction = normalizeTaskAction(params.get("task_action"));
+const returnToUrl = sanitizeReturnTo(params.get("return_to"));
+let editingChecklistId = Number.isFinite(requestedEditChecklistId) && requestedEditChecklistId > 0 ? requestedEditChecklistId : null;
+let hasHandledInitialTaskEntry = false;
 
 function normalizeTaskSortKey(raw) {
   const key = String(raw || "manual").trim();
   return ["manual", "title", "start_date", "target_date"].includes(key) ? key : "manual";
+}
+
+function normalizeTaskAction(raw) {
+  const value = String(raw || "").trim();
+  return value === "edit" || value === "create" ? value : "";
+}
+
+function sanitizeReturnTo(raw) {
+  const input = String(raw || "").trim();
+  if (!input) return "";
+  try {
+    const parsed = new URL(input, window.location.origin);
+    if (parsed.origin !== window.location.origin) return "";
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch (_) {
+    return "";
+  }
+}
+
+function describeReturnTarget(url) {
+  if (String(url).startsWith("/static/project_gantt.html")) return "간트 차트";
+  if (String(url).startsWith("/static/project_calendar.html")) return "캘린더";
+  if (String(url).startsWith("/static/project.html")) return "작업 보드";
+  return "이전 화면";
+}
+
+function buildReturnUrl(checklistId = null) {
+  if (!returnToUrl) return "";
+  const parsed = new URL(returnToUrl, window.location.origin);
+  if (checklistId) parsed.searchParams.set("checklist_id", String(checklistId));
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+}
+
+function maybeReturnToOrigin(checklistId = null) {
+  const nextUrl = buildReturnUrl(checklistId) || returnToUrl;
+  if (!nextUrl) return false;
+  window.location.href = nextUrl;
+  return true;
 }
 
 function stageLabel(stage) {
@@ -127,10 +180,98 @@ function syncTaskSortToUrl() {
 function renderTaskSortUi() {
   if (els.taskSortSelect) els.taskSortSelect.value = currentTaskSort;
   if (!els.taskSortHint) return;
+  if (!canEditTasks) {
+    els.taskSortHint.textContent = "읽기 전용 보기입니다. 작업 정렬 기준만 바꿔서 확인할 수 있습니다.";
+    return;
+  }
   els.taskSortHint.textContent =
     currentTaskSort === "manual"
       ? "기존 정렬에서는 드래그로 순서를 직접 바꿀 수 있습니다."
       : "선택한 기준이 모든 대항목에 일괄 적용됩니다. 이 상태에서는 드래그 정렬이 잠시 비활성화됩니다.";
+}
+
+function renderTaskReturnBanner() {
+  if (!els.taskReturnBanner || !els.taskReturnLink || !els.taskReturnTitle || !els.taskReturnDescription) return;
+  if (!returnToUrl) {
+    els.taskReturnBanner.classList.add("hidden");
+    return;
+  }
+
+  const targetName = describeReturnTarget(returnToUrl);
+  els.taskReturnBanner.classList.remove("hidden");
+  els.taskReturnLink.href = returnToUrl;
+  els.taskReturnTitle.textContent = `작업 저장 후 ${targetName}로 돌아갑니다.`;
+  els.taskReturnDescription.textContent =
+    requestedTaskAction === "edit"
+      ? "작업을 수정하거나 삭제하면 원래 보던 화면으로 자동 복귀합니다."
+      : "작업을 추가하거나 수정하면 원래 보던 화면으로 자동 복귀합니다.";
+}
+
+function focusTaskEntryPoint() {
+  if (hasHandledInitialTaskEntry) return;
+  if (!requestedTaskAction && !editingChecklistId && !returnToUrl) return;
+
+  document.getElementById("task-management")?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  if (editingChecklistId) {
+    const editForm = els.stages?.querySelector(`[data-edit-checklist-form="${editingChecklistId}"]`);
+    const contentInput = editForm?.querySelector("[name='content']");
+    if (editForm) {
+      editForm.scrollIntoView({ behavior: "smooth", block: "center" });
+      contentInput?.focus();
+      hasHandledInitialTaskEntry = true;
+      return;
+    }
+  }
+
+  const createInput = els.stages?.querySelector(".project-item-create-form [name='content']");
+  if (createInput && requestedTaskAction === "create") {
+    createInput.focus();
+    hasHandledInitialTaskEntry = true;
+    return;
+  }
+
+  if (requestedTaskAction === "create" && els.stageNameInput) {
+    els.stageNameInput.focus();
+    hasHandledInitialTaskEntry = true;
+    return;
+  }
+
+  if (returnToUrl) {
+    hasHandledInitialTaskEntry = true;
+  }
+}
+
+function roleBadgeLabel(role) {
+  return role === "viewer" ? "Viewer" : "참가자";
+}
+
+function roleBadgeClass(role) {
+  return role === "viewer" ? "badge--viewer" : "badge--participant";
+}
+
+function applyProjectPermissionState() {
+  const projectFormFields = els.form?.querySelectorAll("input, select, textarea, button") || [];
+  projectFormFields.forEach((field) => {
+    field.disabled = !canManageProject;
+  });
+
+  const participantFormFields = els.participantForm?.querySelectorAll("input, select, button") || [];
+  participantFormFields.forEach((field) => {
+    field.disabled = !canManageParticipants;
+  });
+
+  const stageFormFields = els.stageCreateForm?.querySelectorAll("input, select, textarea, button") || [];
+  stageFormFields.forEach((field) => {
+    field.disabled = !canManageStages;
+  });
+
+  if (els.templateSelect) els.templateSelect.disabled = !canApplyTemplates || templates.length === 0;
+  if (els.applyTemplateBtn) els.applyTemplateBtn.disabled = !canApplyTemplates || templates.length === 0;
+
+  if (!canEditTasks) {
+    editingChecklistId = null;
+  }
 }
 
 function moveIdBeforeOrAfter(list, draggedId, targetId, placeAfter = false) {
@@ -189,12 +330,14 @@ function renderTemplateSelect() {
   if (templates.length === 0) {
     els.templateSelect.innerHTML = "<option value=''>사용 가능한 템플릿이 없습니다.</option>";
     els.applyTemplateBtn.disabled = true;
+    if (els.templateSelect) els.templateSelect.disabled = true;
     return;
   }
   els.templateSelect.innerHTML = templates
     .map((tpl) => `<option value="${tpl.id}">${escapeHtml(tpl.name)}</option>`)
     .join("");
-  els.applyTemplateBtn.disabled = false;
+  els.templateSelect.disabled = !canApplyTemplates;
+  els.applyTemplateBtn.disabled = !canApplyTemplates;
 }
 
 function renderParticipants() {
@@ -222,12 +365,27 @@ function renderParticipants() {
         <div class="item__head">
           <div class="actions">
             <strong>${escapeHtml(x.username)}</strong>
-            ${x.username === x.project_owner ? '<span class="badge badge--owner">Owner</span>' : ""}
+            ${
+              x.username === x.project_owner
+                ? '<span class="badge badge--owner">Owner</span>'
+                : `<span class="badge ${roleBadgeClass(x.role)}">${roleBadgeLabel(x.role)}</span>`
+            }
           </div>
           ${
             x.username === x.project_owner
               ? ""
-              : `<button type="button" class="danger" data-del-participant="${escapeHtml(x.username)}">삭제</button>`
+              : canManageParticipants
+                ? `
+                  <div class="participant-role-controls">
+                    <select data-participant-role="${escapeHtml(x.username)}">
+                      <option value="editor" ${x.role === "viewer" ? "" : "selected"}>참가자</option>
+                      <option value="viewer" ${x.role === "viewer" ? "selected" : ""}>Viewer</option>
+                    </select>
+                    <button type="button" data-save-participant-role="${escapeHtml(x.username)}">권한 변경</button>
+                    <button type="button" class="danger" data-del-participant="${escapeHtml(x.username)}">삭제</button>
+                  </div>
+                `
+                : ""
           }
         </div>
         <div class="item__meta">${escapeHtml(x.display_name || "")}</div>
@@ -260,7 +418,11 @@ function renderStageManager() {
   els.stageList.innerHTML = projectStages
     .map(
       (stage, idx) => `
-      <div class="item stage-manager-item" draggable="true" data-stage-drag-id="${stage.id}">
+      <div
+        class="item stage-manager-item ${canManageStages ? "" : "stage-manager-item--readonly"}"
+        ${canManageStages ? 'draggable="true"' : ""}
+        data-stage-drag-id="${stage.id}"
+      >
         <div class="item__head">
           <div class="stage-manager-title">
             <span class="stage-manager-index">${idx + 1}</span>
@@ -268,10 +430,16 @@ function renderStageManager() {
           </div>
           <span class="badge stage-key-badge">${escapeHtml(stage.stage_key)}</span>
         </div>
-        <div class="actions stage-manager-actions">
-          <button type="button" data-edit-stage="${stage.id}">이름 변경</button>
-          <button type="button" class="danger" data-delete-stage="${stage.id}">삭제</button>
-        </div>
+        ${
+          canManageStages
+            ? `
+              <div class="actions stage-manager-actions">
+                <button type="button" data-edit-stage="${stage.id}">이름 변경</button>
+                <button type="button" class="danger" data-delete-stage="${stage.id}">삭제</button>
+              </div>
+            `
+            : ""
+        }
       </div>
     `
     )
@@ -334,7 +502,7 @@ function renderStage(stage) {
       ? "<div class='item__meta'>작업 항목이 없습니다.</div>"
       : items
           .map((item) => {
-            if (editingChecklistId === Number(item.id)) {
+            if (canEditTasks && editingChecklistId === Number(item.id)) {
               return `
             <form class="template-item-editor project-item-editor" data-edit-checklist-form="${item.id}">
               <input
@@ -383,13 +551,17 @@ function renderStage(stage) {
 
             return `
             <div
-              class="template-item-card project-item-card ${item.is_done ? "project-item-card--done" : ""}"
-              ${editingChecklistId === null && currentTaskSort === "manual" ? 'draggable="true"' : ""}
+              class="template-item-card project-item-card ${item.is_done ? "project-item-card--done" : ""} ${
+                canEditTasks ? "" : "project-item-card--readonly"
+              }"
+              ${canEditTasks && editingChecklistId === null && currentTaskSort === "manual" ? 'draggable="true"' : ""}
               data-stage-checklist-drag-id="${item.id}"
               data-stage-checklist-stage="${escapeHtml(stage.stage_key)}"
             >
               <label class="inline-check project-item-card__toggle">
-                <input type="checkbox" data-toggle-item="${item.id}" ${item.is_done ? "checked" : ""} />
+                <input type="checkbox" data-toggle-item="${item.id}" ${item.is_done ? "checked" : ""} ${
+                  canEditTasks ? "" : "disabled"
+                } />
                 완료
               </label>
               <div class="template-item-card__body">
@@ -397,10 +569,16 @@ function renderStage(stage) {
                 <div class="item__meta">${escapeHtml(descriptionPreview(item.description || ""))}</div>
                 <div class="item__meta">${escapeHtml(schedulePreview(item))}</div>
               </div>
-              <div class="actions">
-                <button type="button" data-edit-checklist="${item.id}">수정</button>
-                <button type="button" class="danger check-del" data-del-item="${item.id}">삭제</button>
-              </div>
+              ${
+                canEditTasks
+                  ? `
+                    <div class="actions">
+                      <button type="button" data-edit-checklist="${item.id}">수정</button>
+                      <button type="button" class="danger check-del" data-del-item="${item.id}">삭제</button>
+                    </div>
+                  `
+                  : ""
+              }
             </div>
           `;
           })
@@ -413,30 +591,36 @@ function renderStage(stage) {
         <span class="badge">${items.length}개</span>
       </div>
       <div class="check-list" data-stage-item-list="${escapeHtml(stage.stage_key)}">${listHtml}</div>
-      <form class="check-form work-check-form project-item-create-form" data-stage-form="${stage.stage_key}">
-        <input name="content" placeholder="작업 항목 입력" required minlength="1" maxlength="200" />
-        <textarea name="description" placeholder="설명 팝업 내용 입력" maxlength="5000"></textarea>
-        <div class="project-item-editor__grid">
-          <label class="project-item-editor__field">
-            <span class="item__meta">시작일</span>
-            <input name="start_date" type="date" />
-          </label>
-          <label class="project-item-editor__field">
-            <span class="item__meta">목표일</span>
-            <input name="target_date" type="date" />
-          </label>
-          <label class="project-item-editor__field">
-            <span class="item__meta">상태</span>
-            <select name="workflow_status">
-              <option value="upcoming">Upcoming</option>
-              <option value="backlog">Backlog</option>
-              <option value="inprogress">In Progress</option>
-              <option value="done">Done</option>
-            </select>
-          </label>
-        </div>
-        <button type="submit">추가</button>
-      </form>
+      ${
+        canEditTasks
+          ? `
+            <form class="check-form work-check-form project-item-create-form" data-stage-form="${stage.stage_key}">
+              <input name="content" placeholder="작업 항목 입력" required minlength="1" maxlength="200" />
+              <textarea name="description" placeholder="설명 팝업 내용 입력" maxlength="5000"></textarea>
+              <div class="project-item-editor__grid">
+                <label class="project-item-editor__field">
+                  <span class="item__meta">시작일</span>
+                  <input name="start_date" type="date" />
+                </label>
+                <label class="project-item-editor__field">
+                  <span class="item__meta">목표일</span>
+                  <input name="target_date" type="date" />
+                </label>
+                <label class="project-item-editor__field">
+                  <span class="item__meta">상태</span>
+                  <select name="workflow_status">
+                    <option value="upcoming">Upcoming</option>
+                    <option value="backlog">Backlog</option>
+                    <option value="inprogress">In Progress</option>
+                    <option value="done">Done</option>
+                  </select>
+                </label>
+              </div>
+              <button type="submit">추가</button>
+            </form>
+          `
+          : "<div class='item'><div class='item__meta'>읽기 전용 보기입니다. 작업 추가는 허용되지 않습니다.</div></div>"
+      }
     </article>
   `;
 }
@@ -455,7 +639,7 @@ async function saveStageChecklistOrder(stageKey, nextItemIds) {
 }
 
 function bindBoardDragEvents() {
-  if (!els.board) return;
+  if (!els.board || !canEditTasks) return;
   els.board.querySelectorAll("[data-drag-item]").forEach((card) => {
     card.addEventListener("dragstart", () => {
       draggingChecklistId = Number(card.getAttribute("data-drag-item"));
@@ -494,7 +678,15 @@ function bindBoardDragEvents() {
 
 async function loadProject() {
   const project = await api.get(`/api/projects/${projectId}`);
+  currentProject = project;
+  const fallbackManage = Boolean(currentUser?.is_admin || project.owner === currentUser?.username);
+  canManageProject = Boolean(project.can_manage_project ?? fallbackManage);
+  canManageParticipants = Boolean(project.can_manage_participants ?? fallbackManage);
+  canManageStages = Boolean(project.can_manage_stages ?? fallbackManage);
+  canApplyTemplates = Boolean(project.can_apply_templates ?? fallbackManage);
+  canEditTasks = Boolean(project.can_edit_tasks ?? fallbackManage);
   setProjectForm(project);
+  applyProjectPermissionState();
 }
 
 async function loadStages() {
@@ -507,11 +699,13 @@ async function loadChecklist() {
   if (els.board) renderBoard();
   if (els.stages) renderStages();
   if (els.board) bindBoardDragEvents();
+  focusTaskEntryPoint();
 }
 
 async function loadTemplates() {
   templates = await api.get("/api/templates");
   renderTemplateSelect();
+  applyProjectPermissionState();
   scheduleStageListHeightAdjustment();
 }
 
@@ -538,6 +732,10 @@ els.logoutBtn.addEventListener("click", async () => {
 
 els.form?.addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (!canManageProject) {
+    alert("프로젝트 기본 정보를 수정할 권한이 없습니다.");
+    return;
+  }
   try {
     const payload = Object.fromEntries(new FormData(els.form).entries());
     const owner = String(payload.owner || "").trim();
@@ -557,8 +755,13 @@ els.form?.addEventListener("submit", async (e) => {
 
 els.participantForm?.addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (!canManageParticipants) {
+    alert("참가자를 관리할 권한이 없습니다.");
+    return;
+  }
   try {
     const username = String(els.participantUsername?.value || "").trim();
+    const role = String(els.participantRole?.value || "editor").trim();
     if (!username) {
       alert("참가자 아이디를 입력해 주세요.");
       els.participantUsername?.focus();
@@ -572,7 +775,7 @@ els.participantForm?.addEventListener("submit", async (e) => {
       return;
     }
 
-    await api.post(`/api/projects/${projectId}/participants`, { username });
+    await api.post(`/api/projects/${projectId}/participants`, { username, role });
     els.participantForm.reset();
     await loadParticipants();
   } catch (err) {
@@ -581,8 +784,31 @@ els.participantForm?.addEventListener("submit", async (e) => {
 });
 
 els.participantList?.addEventListener("click", async (e) => {
+  const saveRoleBtn = e.target.closest("[data-save-participant-role]");
+  if (saveRoleBtn) {
+    if (!canManageParticipants) {
+      alert("참가자를 관리할 권한이 없습니다.");
+      return;
+    }
+    const username = saveRoleBtn.getAttribute("data-save-participant-role");
+    const row = saveRoleBtn.closest(".item");
+    const roleSelect = row?.querySelector("[data-participant-role]");
+    const role = String(roleSelect?.value || "editor").trim();
+    try {
+      await api.patch(`/api/projects/${projectId}/participants/${encodeURIComponent(username)}`, { role });
+      await loadParticipants();
+    } catch (err) {
+      alert(parseApiError(err));
+    }
+    return;
+  }
+
   const btn = e.target.closest("[data-del-participant]");
   if (!btn) return;
+  if (!canManageParticipants) {
+    alert("참가자를 관리할 권한이 없습니다.");
+    return;
+  }
   const username = btn.getAttribute("data-del-participant");
   if (!confirm(`${username} 참가자를 제외할까요?`)) return;
   try {
@@ -595,6 +821,10 @@ els.participantList?.addEventListener("click", async (e) => {
 
 els.stageCreateForm?.addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (!canManageStages) {
+    alert("대항목을 관리할 권한이 없습니다.");
+    return;
+  }
   const name = String(els.stageNameInput?.value || "").trim();
   if (!name) {
     alert("대항목 이름을 입력해 주세요.");
@@ -614,6 +844,10 @@ els.stageCreateForm?.addEventListener("submit", async (e) => {
 els.stageList?.addEventListener("click", async (e) => {
   const editBtn = e.target.closest("[data-edit-stage]");
   if (editBtn) {
+    if (!canManageStages) {
+      alert("대항목을 관리할 권한이 없습니다.");
+      return;
+    }
     const stageId = Number(editBtn.getAttribute("data-edit-stage"));
     const target = projectStages.find((x) => Number(x.id) === stageId);
     if (!target) return;
@@ -636,6 +870,10 @@ els.stageList?.addEventListener("click", async (e) => {
 
   const deleteBtn = e.target.closest("[data-delete-stage]");
   if (!deleteBtn) return;
+  if (!canManageStages) {
+    alert("대항목을 관리할 권한이 없습니다.");
+    return;
+  }
   const stageId = Number(deleteBtn.getAttribute("data-delete-stage"));
   const target = projectStages.find((x) => Number(x.id) === stageId);
   if (!target) return;
@@ -650,6 +888,7 @@ els.stageList?.addEventListener("click", async (e) => {
 });
 
 els.stageList?.addEventListener("dragstart", (e) => {
+  if (!canManageStages) return;
   const item = e.target.closest("[data-stage-drag-id]");
   if (!item) return;
   draggingStageManagerId = Number(item.getAttribute("data-stage-drag-id"));
@@ -661,11 +900,13 @@ els.stageList?.addEventListener("dragstart", (e) => {
 });
 
 els.stageList?.addEventListener("dragend", () => {
+  if (!canManageStages) return;
   draggingStageManagerId = null;
   clearDragIndicators(els.stageList);
 });
 
 els.stageList?.addEventListener("dragover", (e) => {
+  if (!canManageStages) return;
   if (!draggingStageManagerId) return;
   const target = e.target.closest("[data-stage-drag-id]");
   if (!target) return;
@@ -676,6 +917,7 @@ els.stageList?.addEventListener("dragover", (e) => {
 });
 
 els.stageList?.addEventListener("dragleave", (e) => {
+  if (!canManageStages) return;
   const relatedTarget = e.relatedTarget;
   if (relatedTarget && els.stageList.contains(relatedTarget)) return;
   els.stageList.querySelectorAll(".drag-target-before, .drag-target-after").forEach((node) => {
@@ -684,6 +926,7 @@ els.stageList?.addEventListener("dragleave", (e) => {
 });
 
 els.stageList?.addEventListener("drop", async (e) => {
+  if (!canManageStages) return;
   const target = e.target.closest("[data-stage-drag-id]");
   if (!draggingStageManagerId || !target) return;
   const targetId = Number(target.getAttribute("data-stage-drag-id"));
@@ -706,6 +949,10 @@ els.stageList?.addEventListener("drop", async (e) => {
 });
 
 els.applyTemplateBtn.addEventListener("click", async () => {
+  if (!canApplyTemplates) {
+    alert("템플릿을 적용할 권한이 없습니다.");
+    return;
+  }
   const templateId = Number(els.templateSelect.value);
   if (!templateId) return;
   if (!confirm("현재 작업 항목을 지우고 선택한 템플릿으로 적용할까요?")) return;
@@ -716,6 +963,11 @@ els.applyTemplateBtn.addEventListener("click", async () => {
 });
 
 els.stages?.addEventListener("submit", async (e) => {
+  if (!canEditTasks) {
+    e.preventDefault();
+    alert("작업 항목을 수정할 권한이 없습니다.");
+    return;
+  }
   const editForm = e.target.closest("[data-edit-checklist-form]");
   if (editForm) {
     e.preventDefault();
@@ -737,6 +989,7 @@ els.stages?.addEventListener("submit", async (e) => {
       is_done: Boolean(payload.is_done),
     });
     editingChecklistId = null;
+    if (maybeReturnToOrigin(itemId)) return;
     await loadChecklist();
     return;
   }
@@ -759,13 +1012,15 @@ els.stages?.addEventListener("submit", async (e) => {
     form.querySelector("[name='content']")?.focus();
     return;
   }
-  await api.post(`/api/projects/${projectId}/checklists`, body);
+  const created = await api.post(`/api/projects/${projectId}/checklists`, body);
   editingChecklistId = null;
   form.reset();
+  if (maybeReturnToOrigin(created?.id)) return;
   await loadChecklist();
 });
 
 els.stages?.addEventListener("change", async (e) => {
+  if (!canEditTasks) return;
   const checkbox = e.target.closest("[data-toggle-item]");
   if (!checkbox) return;
   const itemId = checkbox.getAttribute("data-toggle-item");
@@ -776,6 +1031,10 @@ els.stages?.addEventListener("change", async (e) => {
 els.stages?.addEventListener("click", async (e) => {
   const editBtn = e.target.closest("[data-edit-checklist]");
   if (editBtn) {
+    if (!canEditTasks) {
+      alert("작업 항목을 수정할 권한이 없습니다.");
+      return;
+    }
     editingChecklistId = Number(editBtn.getAttribute("data-edit-checklist"));
     await loadChecklist();
     return;
@@ -790,14 +1049,23 @@ els.stages?.addEventListener("click", async (e) => {
 
   const btn = e.target.closest("[data-del-item]");
   if (!btn) return;
+  if (!canEditTasks) {
+    alert("작업 항목을 삭제할 권한이 없습니다.");
+    return;
+  }
   const itemId = btn.getAttribute("data-del-item");
   if (!confirm("작업 항목을 삭제할까요?")) return;
   editingChecklistId = null;
   await api.del(`/api/checklists/${itemId}`);
+  if (returnToUrl && Number(itemId) === requestedEditChecklistId) {
+    maybeReturnToOrigin();
+    return;
+  }
   await loadChecklist();
 });
 
 els.stages?.addEventListener("dragstart", (e) => {
+  if (!canEditTasks || currentTaskSort !== "manual") return;
   const item = e.target.closest("[data-stage-checklist-drag-id]");
   if (!item || editingChecklistId !== null) return;
   draggingStageChecklistId = Number(item.getAttribute("data-stage-checklist-drag-id"));
@@ -810,12 +1078,14 @@ els.stages?.addEventListener("dragstart", (e) => {
 });
 
 els.stages?.addEventListener("dragend", () => {
+  if (!canEditTasks) return;
   draggingStageChecklistId = null;
   draggingStageChecklistStageKey = null;
   clearDragIndicators(els.stages);
 });
 
 els.stages?.addEventListener("dragover", (e) => {
+  if (!canEditTasks || currentTaskSort !== "manual") return;
   if (!draggingStageChecklistId || !draggingStageChecklistStageKey) return;
   const target = e.target.closest("[data-stage-checklist-drag-id]");
   if (!target) return;
@@ -828,6 +1098,7 @@ els.stages?.addEventListener("dragover", (e) => {
 });
 
 els.stages?.addEventListener("dragleave", (e) => {
+  if (!canEditTasks) return;
   const relatedTarget = e.relatedTarget;
   if (relatedTarget && els.stages.contains(relatedTarget)) return;
   els.stages.querySelectorAll(".drag-target-before, .drag-target-after").forEach((node) => {
@@ -836,6 +1107,7 @@ els.stages?.addEventListener("dragleave", (e) => {
 });
 
 els.stages?.addEventListener("drop", async (e) => {
+  if (!canEditTasks || currentTaskSort !== "manual") return;
   const target = e.target.closest("[data-stage-checklist-drag-id]");
   if (!draggingStageChecklistId || !draggingStageChecklistStageKey || !target) return;
 
@@ -888,6 +1160,10 @@ els.board?.addEventListener("click", async (e) => {
 
   const saveContentBtn = e.target.closest("[data-save-content-board]");
   if (saveContentBtn) {
+    if (!canEditTasks) {
+      alert("작업 항목을 수정할 권한이 없습니다.");
+      return;
+    }
     const id = saveContentBtn.getAttribute("data-save-content-board");
     const input = els.board.querySelector(`[data-content-board="${id}"]`);
     const content = (input.value || "").trim();
@@ -903,11 +1179,17 @@ els.board?.addEventListener("click", async (e) => {
 
   const saveDateBtn = e.target.closest("[data-save-date-board]");
   if (!saveDateBtn) return;
+  if (!canEditTasks) {
+    alert("작업 항목을 수정할 권한이 없습니다.");
+    return;
+  }
   const id = saveDateBtn.getAttribute("data-save-date-board");
   const input = els.board.querySelector(`[data-date-board="${id}"]`);
   await api.patch(`/api/checklists/${id}`, { target_date: input.value || null });
   await loadChecklist();
 });
+
+renderTaskReturnBanner();
 
 Promise.resolve()
   .then(async () => {

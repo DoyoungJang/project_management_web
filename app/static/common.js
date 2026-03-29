@@ -215,7 +215,11 @@
   function renderTaskDescriptionDialog(dialog) {
     const state = getTaskDialogState(dialog);
     const options = state.options || {};
-    const editable = Boolean(options.editable && typeof options.onSave === "function");
+    const canInlineEdit = Boolean(options.editable && typeof options.onSave === "function");
+    const canNavigateToEdit = Boolean(
+      options.editable && (typeof options.onEditNavigate === "function" || String(options.editHref || "").trim())
+    );
+    const hasEditAction = canInlineEdit || canNavigateToEdit;
 
     const title = dialog.querySelector("#task-desc-dialog-title");
     const meta = dialog.querySelector("#task-desc-dialog-meta");
@@ -235,9 +239,9 @@
     if (meta) meta.textContent = metaParts.join(" | ");
 
     if (editBtn) {
-      editBtn.hidden = !editable || state.mode === "edit";
+      editBtn.hidden = !hasEditAction || state.mode === "edit";
       editBtn.disabled = state.saving;
-      editBtn.textContent = "\uC218\uC815";
+      editBtn.textContent = options.editLabel || (canNavigateToEdit && !canInlineEdit ? "\uAD00\uB9AC \uD398\uC774\uC9C0\uB85C \uC774\uB3D9" : "\uC218\uC815");
     }
 
     if (closeBtn) closeBtn.disabled = state.saving;
@@ -255,7 +259,7 @@
     }
 
     if (form) {
-      const showForm = editable && state.mode === "edit";
+      const showForm = canInlineEdit && state.mode === "edit";
       form.hidden = !showForm;
       form.style.display = showForm ? "grid" : "none";
 
@@ -281,7 +285,7 @@
       if (targetDateInput) targetDateInput.value = String(options.targetDate || "");
       if (statusSelect) statusSelect.value = String(options.workflowStatus || "upcoming");
       inputs.forEach((input) => {
-        input.disabled = !(editable && state.mode === "edit") || state.saving;
+        input.disabled = !(canInlineEdit && state.mode === "edit") || state.saving;
       });
     }
 
@@ -355,7 +359,16 @@
 
     dialog.querySelector("#task-desc-edit-btn")?.addEventListener("click", () => {
       const state = getTaskDialogState(dialog);
+      const options = state.options || {};
       if (state.saving) return;
+      if (options.editable && typeof options.onEditNavigate === "function") {
+        options.onEditNavigate();
+        return;
+      }
+      if (options.editable && String(options.editHref || "").trim()) {
+        window.location.href = String(options.editHref).trim();
+        return;
+      }
       state.mode = "edit";
       renderTaskDescriptionDialog(dialog);
     });

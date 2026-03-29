@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>프로젝트 설정</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260325_6" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260329_4" />
   </head>
   <body>
     <header class="hero">
@@ -14,6 +14,7 @@
             <a class="btn-link" href="/">프로젝트 목록</a>
             <a id="project-board-link" class="btn-link" href="#">작업 보드</a>
             <a id="project-gantt-link" class="btn-link" href="#">간트 차트</a>
+            <a id="project-calendar-link" class="btn-link" href="#">캘린더</a>
           </div>
           <div class="actions">
             <a class="btn-link" href="/static/template.html">템플릿</a>
@@ -30,7 +31,7 @@
     <main class="layout">
       <section class="panel">
         <h2>기본 정보</h2>
-        <p class="item__meta">프로젝트명, Owner, 일정, 상태, 설명을 수정하면 목록/보드/설정 화면에 공통 반영됩니다.</p>
+        <p class="item__meta">프로젝트명, Owner, 일정, 상태, 설명을 수정하면 목록/보드/간트/캘린더/설정 화면에 공통 반영됩니다.</p>
         <form id="project-update-form" class="form-grid">
           <input name="name" placeholder="프로젝트명" required minlength="2" />
           <input name="owner" placeholder="owner username" required minlength="2" />
@@ -47,9 +48,13 @@
 
       <section class="panel">
         <h2>프로젝트 참가자</h2>
-        <p class="item__meta">참가자 추가/삭제를 관리합니다. Owner는 항상 참가자에 포함됩니다.</p>
-        <form id="participant-form" class="inline-row">
+        <p class="item__meta">참가자와 viewer를 관리합니다. 참가자는 작업 수정이 가능하고 viewer는 조회만 가능합니다. Owner는 항상 참가자에 포함됩니다.</p>
+        <form id="participant-form" class="inline-row inline-row--triple">
           <input id="participant-username" placeholder="participant username" minlength="2" required />
+          <select id="participant-role">
+            <option value="editor">참가자</option>
+            <option value="viewer">Viewer</option>
+          </select>
           <button type="submit">참가자 추가</button>
         </form>
         <div id="participant-list" class="list" style="margin-top: 10px"></div>
@@ -57,18 +62,25 @@
 
       <section class="panel">
         <h2>템플릿 적용</h2>
-        <p class="item__meta">선택한 템플릿의 대항목/작업 항목이 현재 프로젝트에 적용되며 작업 항목 관리와 작업 보드에 반영됩니다.</p>
+        <p class="item__meta">선택한 템플릿의 대항목/작업 항목이 현재 프로젝트에 적용되며 작업 항목 관리, 작업 보드, 간트, 캘린더에 반영됩니다.</p>
         <div class="inline-row">
           <select id="template-select"></select>
           <button id="apply-template-btn" type="button">선택 템플릿 적용</button>
         </div>
       </section>
 
-      <section class="panel work-panel">
+      <section id="task-management" class="panel work-panel">
         <div class="panel__header work-panel__header">
           <h2>작업 추가/관리</h2>
         </div>
-        <p class="item__meta">대항목과 작업 항목, 시작일/목표일, 설명 팝업 내용을 직접 편집합니다. 여기서 저장한 내용은 작업 보드와 간트 차트에 함께 반영됩니다.</p>
+        <div id="task-return-banner" class="item task-return-banner hidden">
+          <div>
+            <strong id="task-return-title">작업 저장 후 이전 화면으로 돌아갑니다.</strong>
+            <div id="task-return-description" class="item__meta">추가 또는 수정이 완료되면 자동으로 복귀합니다.</div>
+          </div>
+          <a id="task-return-link" class="btn-link" href="#">원래 화면으로 돌아가기</a>
+        </div>
+        <p class="item__meta">대항목과 작업 항목, 시작일/목표일, 설명 팝업 내용을 직접 편집합니다. 여기서 저장한 내용은 작업 보드, 간트 차트, 캘린더에 함께 반영됩니다.</p>
         <div class="work-layout">
           <article class="work-subpanel">
             <h3>대항목 관리</h3>
@@ -112,11 +124,13 @@
         const projectId = Number(params.get("project_id"));
         const boardLink = document.getElementById("project-board-link");
         const ganttLink = document.getElementById("project-gantt-link");
+        const calendarLink = document.getElementById("project-calendar-link");
         if (boardLink && projectId) boardLink.href = `/static/project.html?project_id=${projectId}`;
         if (ganttLink && projectId) ganttLink.href = `/static/project_gantt.html?project_id=${projectId}`;
+        if (calendarLink && projectId) calendarLink.href = `/static/project_calendar.html?project_id=${projectId}`;
       })();
     </script>
-    <script src="/static/common.js?v=20260321_15"></script>
-    <script src="/static/project.js?v=20260325_5"></script>
+    <script src="/static/common.js?v=20260329_3"></script>
+    <script src="/static/project.js?v=20260329_4"></script>
   </body>
 </html>

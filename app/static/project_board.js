@@ -31,6 +31,7 @@ const els = {
   logoutBtn: document.getElementById("logout-btn"),
   settingsLink: document.getElementById("project-settings-link"),
   ganttLink: document.getElementById("project-gantt-link"),
+  calendarLink: document.getElementById("project-calendar-link"),
 };
 
 let checklistItems = [];
@@ -47,6 +48,22 @@ function stageLabel(stage) {
   return foundFallback ? foundFallback.title : stage;
 }
 
+function getCurrentRelativeUrl() {
+  return `${window.location.pathname}${window.location.search}${window.location.hash || ""}`;
+}
+
+function buildTaskManagerUrl(checklistId = null) {
+  const next = new URL("/static/project_settings.html", window.location.origin);
+  next.searchParams.set("project_id", String(projectId));
+  next.searchParams.set("return_to", getCurrentRelativeUrl());
+  next.searchParams.set("task_action", checklistId ? "edit" : "create");
+  if (checklistId) {
+    next.searchParams.set("edit_checklist_id", String(checklistId));
+  }
+  next.hash = "task-management";
+  return `${next.pathname}${next.search}${next.hash}`;
+}
+
 async function loadSession() {
   const me = await api.get("/api/auth/me");
   currentUser = me;
@@ -57,13 +74,17 @@ async function loadSession() {
 async function loadProject() {
   const project = await api.get(`/api/projects/${projectId}`);
   projectTitle = project.name || "프로젝트";
-  canEditTasks = Boolean(currentUser?.is_admin || project.owner === currentUser?.username);
+  canEditTasks = Boolean(project.can_edit_tasks ?? (currentUser?.is_admin || project.owner === currentUser?.username));
   els.title.textContent = `${project.name || "프로젝트"} - 작업 보드`;
   if (els.settingsLink) {
-    els.settingsLink.href = `/static/project_settings.html?project_id=${projectId}`;
+    els.settingsLink.href = buildTaskManagerUrl();
+    els.settingsLink.textContent = "작업 추가/관리 열기";
   }
   if (els.ganttLink) {
     els.ganttLink.href = `/static/project_gantt.html?project_id=${projectId}`;
+  }
+  if (els.calendarLink) {
+    els.calendarLink.href = `/static/project_calendar.html?project_id=${projectId}`;
   }
 }
 
@@ -92,8 +113,10 @@ function renderBoard() {
       .map(
         (item) => `
         <article
-          class="kanban-card ${highlightChecklistId === Number(item.id) ? "focus-target" : ""}"
-          draggable="true"
+          class="kanban-card ${highlightChecklistId === Number(item.id) ? "focus-target" : ""} ${
+            canEditTasks ? "" : "kanban-card--readonly"
+          }"
+          ${canEditTasks ? 'draggable="true"' : ""}
           data-drag-item="${item.id}"
         >
           <div class="kanban-card__head">
@@ -118,6 +141,7 @@ function renderBoard() {
 }
 
 function bindBoardDragEvents() {
+  if (!canEditTasks) return;
   els.board.querySelectorAll("[data-drag-item]").forEach((card) => {
     card.addEventListener("dragstart", () => {
       draggingChecklistId = Number(card.getAttribute("data-drag-item"));
@@ -179,18 +203,8 @@ els.board?.addEventListener("click", (e) => {
     targetDate: item.target_date || "",
     workflowStatus: normalizeWorkflowStatus(item),
     editable: canEditTasks,
-    onSave: async (payload) => {
-      await api.patch(`/api/checklists/${itemId}`, {
-        content: payload.content,
-        description: payload.description,
-        start_date: payload.start_date,
-        target_date: payload.target_date,
-        workflow_status: payload.workflow_status,
-      });
-      await loadChecklist();
-      const refreshed = checklistItems.find((x) => Number(x.id) === itemId);
-      return refreshed ? { ...refreshed, stageName: stageLabel(refreshed.stage) } : null;
-    },
+    editLabel: "관리 페이지로 이동",
+    editHref: canEditTasks ? buildTaskManagerUrl(itemId) : "",
   });
 });
 

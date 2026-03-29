@@ -1,5 +1,6 @@
 const params = new URLSearchParams(window.location.search);
 const projectId = Number(params.get("project_id"));
+const returnChecklistId = Number(params.get("checklist_id") || "0");
 
 if (!projectId) {
   alert("유효하지 않은 프로젝트입니다.");
@@ -14,6 +15,7 @@ const els = {
   title: document.getElementById("project-title"),
   subtitle: document.getElementById("project-subtitle"),
   projectBoardLink: document.getElementById("project-board-link"),
+  projectCalendarLink: document.getElementById("project-calendar-link"),
   projectSettingsLink: document.getElementById("project-settings-link"),
   adminLink: document.getElementById("admin-link"),
   logoutBtn: document.getElementById("logout-btn"),
@@ -51,6 +53,7 @@ let selectedTaskIds = new Set();
 let currentSort = "timeline";
 let currentGanttRenderState = null;
 let currentGanttHoveredTrack = null;
+let hasAppliedReturnFocus = false;
 const ganttCursorWeekdayFormatter = new Intl.DateTimeFormat("ko-KR", { weekday: "short" });
 
 function parseTaskFilterSelection(raw) {
@@ -65,6 +68,22 @@ function parseTaskFilterSelection(raw) {
   );
   if (!ids.size) return { mode: "all", ids: new Set() };
   return { mode: "custom", ids };
+}
+
+function getCurrentRelativeUrl() {
+  return `${window.location.pathname}${window.location.search}${window.location.hash || ""}`;
+}
+
+function buildTaskManagerUrl(checklistId = null) {
+  const next = new URL("/static/project_settings.html", window.location.origin);
+  next.searchParams.set("project_id", String(projectId));
+  next.searchParams.set("return_to", getCurrentRelativeUrl());
+  next.searchParams.set("task_action", checklistId ? "edit" : "create");
+  if (checklistId) {
+    next.searchParams.set("edit_checklist_id", String(checklistId));
+  }
+  next.hash = "task-management";
+  return `${next.pathname}${next.search}${next.hash}`;
 }
 
 const initialTaskFilter = parseTaskFilterSelection(params.get("visible_tasks"));
@@ -451,24 +470,8 @@ function openChecklistDetails(checklistId) {
     targetDate: item.target_date || "",
     workflowStatus: item.workflow_status || "upcoming",
     editable: canEditTasks,
-    onSave: async (payload) => {
-      await api.patch(`/api/checklists/${checklistId}`, {
-        content: payload.content,
-        description: payload.description,
-        start_date: payload.start_date,
-        target_date: payload.target_date,
-        workflow_status: payload.workflow_status,
-      });
-      await loadProjectData();
-      renderGanttChart();
-      const refreshed = findChecklistItem(checklistId);
-      return refreshed
-        ? {
-            ...refreshed,
-            stageName: stageLabel(refreshed.stage),
-          }
-        : null;
-    },
+    editLabel: "관리 페이지로 이동",
+    editHref: canEditTasks ? buildTaskManagerUrl(checklistId) : "",
   });
 }
 
@@ -1423,7 +1426,7 @@ async function loadProjectData() {
   currentProject = project;
   projectStages = Array.isArray(stages) ? stages : [];
   checklistItems = Array.isArray(checklists) ? checklists : [];
-  canEditTasks = Boolean(currentUser?.is_admin || project.owner === currentUser?.username);
+  canEditTasks = Boolean(project.can_edit_tasks ?? (currentUser?.is_admin || project.owner === currentUser?.username));
   projectTitle = project.name || "프로젝트";
   syncTaskFilterSelection(checklistItems);
   if (els.sortSelect) els.sortSelect.value = currentSort;
@@ -1432,7 +1435,11 @@ async function loadProjectData() {
   els.title.textContent = `${projectTitle} - 간트 차트`;
   els.subtitle.textContent = `${projectTitle}의 시작일과 목표일 기준 일정을 확인합니다.`;
   els.projectBoardLink.href = `/static/project.html?project_id=${projectId}`;
-  els.projectSettingsLink.href = `/static/project_settings.html?project_id=${projectId}`;
+  if (els.projectCalendarLink) {
+    els.projectCalendarLink.href = `/static/project_calendar.html?project_id=${projectId}`;
+  }
+  els.projectSettingsLink.href = buildTaskManagerUrl();
+  els.projectSettingsLink.textContent = "작업 추가/관리";
 }
 
 els.scroll?.addEventListener("click", (e) => {
@@ -1527,6 +1534,10 @@ Promise.resolve()
     await loadSession();
     await loadProjectData();
     renderGanttChart();
+    if (returnChecklistId && !hasAppliedReturnFocus) {
+      hasAppliedReturnFocus = true;
+      openChecklistDetails(returnChecklistId);
+    }
   })
   .catch((error) => {
     console.error(error);
