@@ -37,9 +37,11 @@ const els = {
   filterClearAll: document.getElementById("gantt-filter-clear-all"),
   sortSelect: document.getElementById("gantt-sort-select"),
   cursorDate: document.getElementById("gantt-cursor-date"),
+  layoutButtons: [...document.querySelectorAll("[data-gantt-layout]")],
 };
 
 const STAGE_COLORS = ["#0f6d66", "#2a6f97", "#c06c2c", "#7a4fb0", "#3b7a57", "#9b2226"];
+const GANTT_LAYOUT_STORAGE_KEY = "pm:gantt-layout-mode";
 
 let currentProject = null;
 let projectStages = [];
@@ -51,6 +53,7 @@ let canEditTasks = false;
 let taskFilterMode = "all";
 let selectedTaskIds = new Set();
 let currentSort = "timeline";
+let currentLayoutMode = "cards";
 let currentGanttRenderState = null;
 let currentGanttHoveredTrack = null;
 let hasAppliedReturnFocus = false;
@@ -90,10 +93,40 @@ const initialTaskFilter = parseTaskFilterSelection(params.get("visible_tasks"));
 taskFilterMode = initialTaskFilter.mode;
 selectedTaskIds = initialTaskFilter.ids;
 currentSort = normalizeSortKey(params.get("sort_by"));
+currentLayoutMode = readStoredGanttLayoutMode();
 
 function normalizeSortKey(raw) {
   const key = String(raw || "timeline").trim();
   return ["timeline", "manual", "start_date", "target_date", "title"].includes(key) ? key : "timeline";
+}
+
+function normalizeGanttLayoutMode(raw) {
+  return String(raw || "").trim() === "table" ? "table" : "cards";
+}
+
+function readStoredGanttLayoutMode() {
+  try {
+    return normalizeGanttLayoutMode(window.localStorage.getItem(GANTT_LAYOUT_STORAGE_KEY));
+  } catch (_) {
+    return "cards";
+  }
+}
+
+function persistGanttLayoutMode(mode) {
+  try {
+    window.localStorage.setItem(GANTT_LAYOUT_STORAGE_KEY, normalizeGanttLayoutMode(mode));
+  } catch (_) {
+    // Ignore storage failures and keep the in-memory selection.
+  }
+}
+
+function renderGanttLayoutToggle() {
+  els.layoutButtons.forEach((button) => {
+    const mode = normalizeGanttLayoutMode(button.getAttribute("data-gantt-layout"));
+    const active = mode === currentLayoutMode;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
 }
 
 function parseLocalDate(value) {
@@ -157,7 +190,8 @@ async function saveChecklistFromDialog(checklistId, payload, fallbackItem = null
     target_date: payload.target_date,
     workflow_status: payload.workflow_status,
   });
-  await loadChecklist();
+  await loadProjectData();
+  renderGanttChart();
   return {
     ...saved,
     stageName: stageLabel(saved.stage || payload.stage || fallbackItem?.stage),
@@ -708,6 +742,8 @@ function renderScheduledRows({ scheduledItems, dayIndexMap, todayIndex, dueIndex
 function renderGanttChart() {
   hideGanttCursorDate();
   currentGanttRenderState = null;
+  if (els.scroll) els.scroll.dataset.layout = currentLayoutMode;
+  renderGanttLayoutToggle();
   const today = parseLocalDate(toDateKey(new Date()));
   const allSortedItems = normalizeItems(today, checklistItems);
   const filteredSourceItems = checklistItems.filter((item) => isChecklistVisible(item));
@@ -1122,6 +1158,212 @@ function buildTimelineTrackBands(days) {
   `;
 }
 
+function buildTimelineMonthSegments(days) {
+  if (!days.length) return [];
+
+  const segments = [];
+  let startIndex = 0;
+
+  for (let index = 1; index <= days.length; index += 1) {
+    const current = days[index];
+    const previous = days[index - 1];
+    const crossedMonth =
+      index === days.length ||
+      current.getMonth() !== previous.getMonth() ||
+      current.getFullYear() !== previous.getFullYear();
+
+    if (!crossedMonth) continue;
+
+    const startDay = days[startIndex];
+    segments.push({
+      startIndex,
+      span: index - startIndex,
+      date: startDay,
+      label: formatTimelineMonthBandLabel(startDay, startDay.getMonth() === 0),
+      yearStart: startDay.getMonth() === 0,
+    });
+    startIndex = index;
+  }
+
+  return segments;
+}
+
+function buildTimelineQuarterSegments(monthSegments) {
+  if (!monthSegments.length) return [];
+
+  const quarters = [];
+  let currentQuarter = null;
+
+  monthSegments.forEach((segment) => {
+    const quarter = Math.floor(segment.date.getMonth() / 3) + 1;
+    const key = `${segment.date.getFullYear()}-Q${quarter}`;
+
+    if (!currentQuarter || currentQuarter.key !== key) {
+      currentQuarter = {
+        key,
+        startIndex: segment.startIndex,
+        span: 0,
+        label: `${segment.date.getFullYear()}년 ${quarter}분기`,
+      };
+      quarters.push(currentQuarter);
+    }
+
+    currentQuarter.span += segment.span;
+  });
+
+  return quarters;
+}
+
+function buildTableStageGroups(items) {
+  const stageOrder = new Map(projectStages.map((stage, index) => [stage.stage_key, index]));
+  const grouped = new Map();
+
+  items.forEach((item) => {
+    const stageKey = String(item.stage || "");
+    if (!grouped.has(stageKey)) grouped.set(stageKey, []);
+    grouped.get(stageKey).push(item);
+  });
+
+  return [...grouped.entries()]
+    .sort((a, b) => {
+      const stageGap = (stageOrder.get(a[0]) ?? 999) - (stageOrder.get(b[0]) ?? 999);
+      if (stageGap) return stageGap;
+      return stageLabel(a[0]).localeCompare(stageLabel(b[0]), "ko", { sensitivity: "base" });
+    })
+    .map(([stageKey, stageItems]) => ({
+      stageKey,
+      stageName: stageLabel(stageKey),
+      items: stageItems,
+    }));
+}
+
+function renderTableGanttBoard({
+  scheduledItems,
+  days,
+  dayIndexMap,
+  todayIndex,
+  dueIndex,
+  styleVars,
+  trackBandsHtml,
+}) {
+  const monthSegments = buildTimelineMonthSegments(days);
+  const quarterSegments = buildTimelineQuarterSegments(monthSegments);
+  const stageGroups = buildTableStageGroups(scheduledItems);
+
+  const headerHtml = `
+    <div class="gantt-table-header">
+      <div class="gantt-table-sidehead gantt-table-sidehead--stage">종류</div>
+      <div class="gantt-table-sidehead gantt-table-sidehead--task">작업</div>
+      <div class="gantt-table-timescale">
+        <div class="gantt-table-quarter-row" style="${styleVars}">
+          ${quarterSegments
+            .map(
+              (segment, index) => `
+                <span
+                  class="gantt-table-quarter-segment ${index % 2 === 0 ? "is-even" : "is-odd"}"
+                  style="left:calc(${segment.startIndex} * var(--gantt-cell-width)); width:calc(${segment.span} * var(--gantt-cell-width));"
+                >
+                  ${escapeHtml(segment.label)}
+                </span>
+              `
+            )
+            .join("")}
+        </div>
+        <div class="gantt-days gantt-days--overview gantt-days--table" style="${styleVars}">
+          ${monthSegments
+            .map(
+              (segment, index) => `
+                <span
+                  class="gantt-table-month-segment ${segment.yearStart ? "is-year-start" : ""} ${index % 2 === 0 ? "is-even" : "is-odd"}"
+                  style="left:calc(${segment.startIndex} * var(--gantt-cell-width)); width:calc(${segment.span} * var(--gantt-cell-width));"
+                >
+                  ${escapeHtml(segment.label)}
+                </span>
+              `
+            )
+            .join("")}
+          <span class="gantt-cursor-line hidden" aria-hidden="true"></span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  if (!stageGroups.length) {
+    return `
+      <div class="gantt-table-board">
+        ${headerHtml}
+        <div class="gantt-table-empty item">
+          <strong>선택한 범위에 표시할 작업이 없습니다.</strong>
+          <div class="item__meta">필터나 일정 범위를 조정하면 표형 간트가 다시 채워집니다.</div>
+        </div>
+      </div>
+    `;
+  }
+
+  const groupsHtml = stageGroups
+    .map((group) => {
+      const rowsHtml = group.items
+        .map((item) => {
+          const range = item.ganttRange;
+          const visibleStart = item.visibleRange?.start || range.start;
+          const visibleEnd = item.visibleRange?.end || range.end;
+          const startIndex = dayIndexMap.get(toDateKey(visibleStart));
+          const endIndex = dayIndexMap.get(toDateKey(visibleEnd));
+          const span = Math.max(1, endIndex - startIndex + 1);
+          const color = stageColor(item.stage);
+          const durationLabel = `${getInclusiveDaySpan(range.start, range.end)}일`;
+          const rangeLabel = `${range.startLabel} ~ ${range.targetLabel}`;
+
+          return `
+            <div class="gantt-table-task-cell">
+              <button
+                type="button"
+                class="gantt-table-task-button"
+                data-open-gantt-description="${item.id}"
+                title="${escapeHtml(item.content)}"
+                aria-label="${escapeHtml(item.content)} 설명 보기"
+              >
+                <strong>${escapeHtml(item.content)}</strong>
+                <span>${escapeHtml(rangeLabel)} · ${escapeHtml(durationLabel)}</span>
+              </button>
+            </div>
+            <div class="gantt-table-track-cell">
+              <div class="gantt-track gantt-track--table" style="${styleVars}">
+                ${trackBandsHtml}
+                ${buildMarkerHtml(todayIndex, dueIndex)}
+                <button
+                  type="button"
+                  class="gantt-bar gantt-bar--table"
+                  data-open-gantt-description="${item.id}"
+                  style="left:calc(${startIndex} * var(--gantt-cell-width)); width:calc(${span} * var(--gantt-cell-width) - 6px); background:${color};"
+                  title="${escapeHtml(item.content)}"
+                  aria-label="${escapeHtml(item.content)} 설명 보기"
+                >
+                  ${span >= 10 ? `<span class="gantt-bar__title">${escapeHtml(item.content)}</span>` : ""}
+                </button>
+                <span class="gantt-cursor-line hidden" aria-hidden="true"></span>
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+
+      return `
+        <section class="gantt-table-group">
+          <div class="gantt-table-stage-cell">
+            <span>${escapeHtml(group.stageName)}</span>
+          </div>
+          <div class="gantt-table-group-body">
+            ${rowsHtml}
+          </div>
+        </section>
+      `;
+    })
+    .join("");
+
+  return `<div class="gantt-table-board">${headerHtml}${groupsHtml}</div>`;
+}
+
 function renderTimelineDayCell(day, index, days, config) {
   const label = getTimelineLabel(day, index, days, config);
   if (!label) return "";
@@ -1387,6 +1629,19 @@ function renderGanttChart() {
 
   els.rangeLabel.textContent = formatRange(appliedRange.start, appliedRange.end);
 
+  if (currentLayoutMode === "table") {
+    els.scroll.innerHTML = renderTableGanttBoard({
+      scheduledItems: visibleScheduledItems,
+      days,
+      dayIndexMap,
+      todayIndex,
+      dueIndex,
+      styleVars,
+      trackBandsHtml,
+    });
+    return;
+  }
+
   const headerHtml = `
     <div class="gantt-row gantt-row--header" style="grid-template-columns:${metrics.labelWidth}px auto;">
       <div class="gantt-label gantt-label--header-card">
@@ -1454,6 +1709,8 @@ async function loadProjectData() {
   projectTitle = project.name || "프로젝트";
   syncTaskFilterSelection(checklistItems);
   if (els.sortSelect) els.sortSelect.value = currentSort;
+  renderGanttLayoutToggle();
+  if (els.scroll) els.scroll.dataset.layout = currentLayoutMode;
   renderTaskFilterPanel();
 
   els.title.textContent = `${projectTitle} - 간트 차트`;
@@ -1539,6 +1796,17 @@ els.sortSelect?.addEventListener("change", (e) => {
   renderGanttChart();
 });
 
+els.layoutButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const nextMode = normalizeGanttLayoutMode(button.getAttribute("data-gantt-layout"));
+    if (nextMode === currentLayoutMode) return;
+    currentLayoutMode = nextMode;
+    persistGanttLayoutMode(currentLayoutMode);
+    renderGanttLayoutToggle();
+    renderGanttChart();
+  });
+});
+
 window.addEventListener("resize", () => {
   renderGanttChart();
 });
@@ -1547,6 +1815,8 @@ els.logoutBtn.addEventListener("click", async () => {
   await api.post("/api/auth/logout", {});
   window.location.href = "/static/login.html";
 });
+
+renderGanttLayoutToggle();
 
 Promise.resolve()
   .then(async () => {

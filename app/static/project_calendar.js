@@ -213,7 +213,8 @@ async function saveChecklistFromDialog(checklistId, payload, fallbackItem = null
     target_date: payload.target_date,
     workflow_status: payload.workflow_status,
   });
-  await loadChecklist();
+  await loadProjectData();
+  renderCalendar();
   return {
     ...saved,
     stageName: stageLabel(saved.stage || payload.stage || fallbackItem?.stage),

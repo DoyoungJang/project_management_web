@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>프로젝트 간트 차트</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260329_4" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260330_1" />
   </head>
   <body class="page-gantt">
     <header class="hero hero--gantt">
@@ -80,6 +80,24 @@
                 <strong>보고 싶은 작업만 선택</strong>
               </div>
               <div class="gantt-filter-panel__controls">
+                <div class="gantt-layout-switch" role="group" aria-label="간트 차트 디자인 선택">
+                  <button
+                    type="button"
+                    class="gantt-layout-switch__button"
+                    data-gantt-layout="cards"
+                    aria-pressed="false"
+                  >
+                    기존 카드형
+                  </button>
+                  <button
+                    type="button"
+                    class="gantt-layout-switch__button"
+                    data-gantt-layout="table"
+                    aria-pressed="false"
+                  >
+                    붙은 표형
+                  </button>
+                </div>
                 <label class="gantt-filter-panel__sort">
                   <span class="gantt-filter-panel__sort-label">정렬</span>
                   <select id="gantt-sort-select">
@@ -188,6 +206,6 @@
       })();
     </script>
     <script src="/static/common.js?v=20260329_2"></script>
-    <script src="/static/project_gantt.js?v=20260329_4"></script>
+    <script src="/static/project_gantt.js?v=20260330_1"></script>
   </body>
 </html>
