@@ -48,6 +48,29 @@ function stageLabel(stage) {
   return foundFallback ? foundFallback.title : stage;
 }
 
+function buildTaskStageOptions() {
+  return projectStages.map((stage) => ({
+    value: stage.stage_key,
+    label: stage.stage_name,
+  }));
+}
+
+async function saveChecklistFromDialog(itemId, payload, fallbackItem = null) {
+  const saved = await api.patch(`/api/checklists/${itemId}`, {
+    stage: payload.stage,
+    content: payload.content,
+    description: payload.description,
+    start_date: payload.start_date,
+    target_date: payload.target_date,
+    workflow_status: payload.workflow_status,
+  });
+  await loadChecklist();
+  return {
+    ...saved,
+    stageName: stageLabel(saved.stage || payload.stage || fallbackItem?.stage),
+  };
+}
+
 function getCurrentRelativeUrl() {
   return `${window.location.pathname}${window.location.search}${window.location.hash || ""}`;
 }
@@ -199,12 +222,13 @@ els.board?.addEventListener("click", (e) => {
     description: item.description || "",
     projectName: projectTitle,
     stageName: stageLabel(item.stage),
+    stageValue: item.stage || "",
+    stageOptions: buildTaskStageOptions(),
     startDate: item.start_date || "",
     targetDate: item.target_date || "",
     workflowStatus: normalizeWorkflowStatus(item),
     editable: canEditTasks,
-    editLabel: "관리 페이지로 이동",
-    editHref: canEditTasks ? buildTaskManagerUrl(itemId) : "",
+    onSave: canEditTasks ? (payload) => saveChecklistFromDialog(itemId, payload, item) : null,
   });
 });
 

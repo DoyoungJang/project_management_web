@@ -197,6 +197,29 @@ function stageColor(stageKey) {
   return STAGE_COLORS[index % STAGE_COLORS.length];
 }
 
+function buildTaskStageOptions() {
+  return projectStages.map((stage) => ({
+    value: stage.stage_key,
+    label: stage.stage_name,
+  }));
+}
+
+async function saveChecklistFromDialog(checklistId, payload, fallbackItem = null) {
+  const saved = await api.patch(`/api/checklists/${checklistId}`, {
+    stage: payload.stage,
+    content: payload.content,
+    description: payload.description,
+    start_date: payload.start_date,
+    target_date: payload.target_date,
+    workflow_status: payload.workflow_status,
+  });
+  await loadChecklist();
+  return {
+    ...saved,
+    stageName: stageLabel(saved.stage || payload.stage || fallbackItem?.stage),
+  };
+}
+
 function syncTaskFilterSelection(items = checklistItems) {
   const availableIds = new Set(items.map((item) => Number(item.id)));
   if (taskFilterMode === "all") {
@@ -383,12 +406,13 @@ function openChecklistDetails(checklistId) {
     description: item.description || "",
     projectName: projectTitle,
     stageName: stageLabel(item.stage),
+    stageValue: item.stage || "",
+    stageOptions: buildTaskStageOptions(),
     startDate: item.start_date || "",
     targetDate: item.target_date || "",
     workflowStatus: item.workflow_status || "upcoming",
     editable: canEditTasks,
-    editLabel: "\uAD00\uB9AC \uD398\uC774\uC9C0\uB85C \uC774\uB3D9",
-    editHref: canEditTasks ? buildTaskManagerUrl(checklistId) : "",
+    onSave: canEditTasks ? (payload) => saveChecklistFromDialog(checklistId, payload, item) : null,
   });
 }
 

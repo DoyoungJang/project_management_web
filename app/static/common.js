@@ -199,16 +199,32 @@
     ].filter(Boolean);
   }
 
+  function resolveDialogOptionLabel(selectOptions = [], value = "", fallback = "") {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue) return String(fallback || "").trim();
+    const match = Array.isArray(selectOptions)
+      ? selectOptions.find((item) => String(item?.value || "").trim() === normalizedValue)
+      : null;
+    if (match) return String(match.label || match.value || normalizedValue).trim();
+    return String(fallback || normalizedValue).trim();
+  }
+
   function updateTaskDialogOptions(options = {}, saved = null, payload = null) {
     const next = { ...options };
     const resolvedContent = saved?.content ?? payload?.content ?? options.content ?? options.title ?? "";
+    const resolvedStageValue = saved?.stage ?? payload?.stage ?? options.stageValue ?? "";
     next.title = resolvedContent || "\uC791\uC5C5 \uC124\uBA85";
     next.content = resolvedContent;
     next.description = saved?.description ?? payload?.description ?? options.description ?? "";
     next.startDate = saved?.start_date ?? payload?.start_date ?? options.startDate ?? "";
     next.targetDate = saved?.target_date ?? payload?.target_date ?? options.targetDate ?? "";
     next.workflowStatus = saved?.workflow_status ?? payload?.workflow_status ?? options.workflowStatus ?? "upcoming";
-    next.stageName = saved?.stageName ?? saved?.stage_name ?? options.stageName ?? "";
+    next.stageValue = String(resolvedStageValue || "").trim();
+    next.stageName = resolveDialogOptionLabel(
+      next.stageOptions,
+      next.stageValue,
+      saved?.stageName ?? saved?.stage_name ?? options.stageName ?? ""
+    );
     return next;
   }
 
@@ -269,10 +285,33 @@
           : DEFAULT_TASK_STATUS_OPTIONS;
       const contentInput = form.querySelector("[name='content']");
       const descriptionInput = form.querySelector("[name='description']");
+      const stageField = form.querySelector("[data-task-stage-field]");
+      const stageSelect = form.querySelector("[name='stage']");
       const startDateInput = form.querySelector("[name='start_date']");
       const targetDateInput = form.querySelector("[name='target_date']");
       const statusSelect = form.querySelector("[name='workflow_status']");
       const inputs = form.querySelectorAll("input, textarea, select");
+      const stageOptions =
+        Array.isArray(options.stageOptions) && options.stageOptions.length ? options.stageOptions : [];
+      const resolvedStageOptions =
+        options.stageValue && !stageOptions.some((item) => String(item.value || "").trim() === String(options.stageValue || "").trim())
+          ? [
+              {
+                value: options.stageValue,
+                label: options.stageName || options.stageValue,
+              },
+              ...stageOptions,
+            ]
+          : stageOptions;
+
+      if (stageField) {
+        stageField.hidden = resolvedStageOptions.length === 0;
+      }
+      if (stageSelect) {
+        stageSelect.innerHTML = resolvedStageOptions
+          .map((item) => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`)
+          .join("");
+      }
 
       if (statusSelect) {
         statusSelect.innerHTML = statusOptions
@@ -281,6 +320,7 @@
       }
       if (contentInput) contentInput.value = String(options.content || options.title || "");
       if (descriptionInput) descriptionInput.value = rawDescription;
+      if (stageSelect) stageSelect.value = String(options.stageValue || "");
       if (startDateInput) startDateInput.value = String(options.startDate || "");
       if (targetDateInput) targetDateInput.value = String(options.targetDate || "");
       if (statusSelect) statusSelect.value = String(options.workflowStatus || "upcoming");
@@ -324,6 +364,10 @@
             <textarea name="description" maxlength="5000"></textarea>
           </label>
           <div class="project-item-editor__grid task-desc-edit-form__grid">
+            <label class="project-item-editor__field" data-task-stage-field hidden>
+              <span class="item__meta">\uB300\uD56D\uBAA9</span>
+              <select name="stage"></select>
+            </label>
             <label class="project-item-editor__field">
               <span class="item__meta">\uC2DC\uC791\uC77C</span>
               <input name="start_date" type="date" />
@@ -391,6 +435,7 @@
       const payload = {
         content: String(formData.get("content") || "").trim(),
         description: String(formData.get("description") || "").trim(),
+        stage: String(formData.get("stage") || "").trim() || null,
         start_date: String(formData.get("start_date") || "").trim() || null,
         target_date: String(formData.get("target_date") || "").trim() || null,
         workflow_status: String(formData.get("workflow_status") || "upcoming").trim() || "upcoming",
@@ -399,6 +444,11 @@
       if (!payload.content) {
         alert("\uC791\uC5C5\uBA85\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694.");
         form.querySelector("[name='content']")?.focus();
+        return;
+      }
+      if (form.querySelector("[data-task-stage-field]") && !form.querySelector("[data-task-stage-field]").hidden && !payload.stage) {
+        alert("\uB300\uD56D\uBAA9\uC744 \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.");
+        form.querySelector("[name='stage']")?.focus();
         return;
       }
 
