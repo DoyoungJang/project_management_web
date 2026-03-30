@@ -17,6 +17,7 @@ const els = {
   projectBoardLink: document.getElementById("project-board-link"),
   projectGanttLink: document.getElementById("project-gantt-link"),
   projectSettingsLink: document.getElementById("project-settings-link"),
+  projectSettingsCtaLink: document.getElementById("project-settings-cta-link"),
   adminLink: document.getElementById("admin-link"),
   logoutBtn: document.getElementById("logout-btn"),
   projectDue: document.getElementById("calendar-project-due"),
@@ -612,8 +613,15 @@ async function loadProjectData() {
   els.subtitle.textContent = `${projectTitle}의 ${CALENDAR_SUBTITLE}`;
   els.projectBoardLink.href = `/static/project.html?project_id=${projectId}`;
   els.projectGanttLink.href = `/static/project_gantt.html?project_id=${projectId}`;
-  els.projectSettingsLink.href = buildTaskManagerUrl();
-  els.projectSettingsLink.textContent = "\uC791\uC5C5 \uCD94\uAC00/\uAD00\uB9AC";
+  const taskManagerUrl = buildTaskManagerUrl();
+  if (els.projectSettingsLink) {
+    els.projectSettingsLink.href = taskManagerUrl;
+    els.projectSettingsLink.textContent = "\uC791\uC5C5 \uCD94\uAC00/\uAD00\uB9AC";
+  }
+  if (els.projectSettingsCtaLink) {
+    els.projectSettingsCtaLink.href = taskManagerUrl;
+    els.projectSettingsCtaLink.textContent = "\uC791\uC5C5 \uCD94\uAC00/\uAD00\uB9AC \uC5F4\uAE30";
+  }
 }
 
 els.grid?.addEventListener("click", (e) => {

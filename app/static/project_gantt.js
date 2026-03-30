@@ -17,6 +17,7 @@ const els = {
   projectBoardLink: document.getElementById("project-board-link"),
   projectCalendarLink: document.getElementById("project-calendar-link"),
   projectSettingsLink: document.getElementById("project-settings-link"),
+  projectSettingsCtaLink: document.getElementById("project-settings-cta-link"),
   adminLink: document.getElementById("admin-link"),
   logoutBtn: document.getElementById("logout-btn"),
   projectDue: document.getElementById("gantt-project-due"),
@@ -1719,8 +1720,15 @@ async function loadProjectData() {
   if (els.projectCalendarLink) {
     els.projectCalendarLink.href = `/static/project_calendar.html?project_id=${projectId}`;
   }
-  els.projectSettingsLink.href = buildTaskManagerUrl();
-  els.projectSettingsLink.textContent = "작업 추가/관리";
+  const taskManagerUrl = buildTaskManagerUrl();
+  if (els.projectSettingsLink) {
+    els.projectSettingsLink.href = taskManagerUrl;
+    els.projectSettingsLink.textContent = "작업 추가/관리";
+  }
+  if (els.projectSettingsCtaLink) {
+    els.projectSettingsCtaLink.href = taskManagerUrl;
+    els.projectSettingsCtaLink.textContent = "작업 추가/관리 열기";
+  }
 }
 
 els.scroll?.addEventListener("click", (e) => {
